@@ -1,0 +1,62 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  engineType = "library"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id              String   @id @default(uuid())
+  username        String
+  avatar          String?
+  accountType     String   // 'registered' | 'guest' | 'qq'
+  accountRole     String   // 'admin' | 'user'
+  roomRole        String?  // 'room_admin' | 'leader' | 'captain' | 'member'
+  teamId          String?
+  isOnline        Boolean  @default(false)
+  micEnabled      Boolean  @default(false)
+  speakerEnabled  Boolean  @default(false)
+  isSpeaking      Boolean  @default(false)
+  
+  roomId          String?
+  room            Room?    @relation(fields: [roomId], references: [id])
+  team            Team?    @relation(fields: [teamId], references: [id])
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Room {
+  id                String   @id @default(uuid())
+  roomName          String
+  status            String   @default("preparing") // 'preparing' | 'assaulting'
+  maxUsers          Int      @default(20)
+  isEnabled         Boolean  @default(true)
+  leaderId          String?
+  
+  users             User[]
+  teams             Team[]
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model Team {
+  id          String   @id @default(uuid())
+  teamColor   String   // 'red' | 'yellow' | 'green' | 'blue' | 'purple'
+  captainId   String?
+  isEnabled   Boolean  @default(true)
+  
+  roomId      String
+  room        Room     @relation(fields: [roomId], references: [id])
+  members     User[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
