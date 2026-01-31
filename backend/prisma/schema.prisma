@@ -14,10 +14,17 @@ datasource db {
 model User {
   id              String   @id @default(uuid())
   username        String
+  password        String?  // Hashed password for registered users
   avatar          String?
-  accountType     String   // 'registered' | 'guest' | 'qq'
-  accountRole     String   // 'admin' | 'user'
-  roomRole        String?  // 'room_admin' | 'leader' | 'captain' | 'member'
+  accountType     String   // "registered" | "guest" | "qq"
+  accountRole     String   // "admin" | "user"
+  roomRole        String?  // "room_admin" | "leader" | "captain" | "member"
+  
+  // Tracking & Auto-login
+  lastIp            String?
+  deviceFingerprint String?
+  lastActiveAt      DateTime @default(now())
+
   teamId          String?
   isOnline        Boolean  @default(false)
   micEnabled      Boolean  @default(false)
@@ -32,10 +39,18 @@ model User {
   updatedAt       DateTime @updatedAt
 }
 
+// Record the latest account for each IP
+model IpBinding {
+  ip                String   @id
+  userId            String
+  deviceFingerprint String?
+  lastActiveAt      DateTime @default(now())
+}
+
 model Room {
   id                String   @id @default(uuid())
   roomName          String
-  status            String   @default("preparing") // 'preparing' | 'assaulting'
+  status            String   @default("preparing") // "preparing" | "assaulting"
   maxUsers          Int      @default(20)
   isEnabled         Boolean  @default(true)
   leaderId          String?
@@ -49,7 +64,7 @@ model Room {
 
 model Team {
   id          String   @id @default(uuid())
-  teamColor   String   // 'red' | 'yellow' | 'green' | 'blue' | 'purple'
+  teamColor   String   // "red" | "yellow" | "green" | "blue" | "purple"
   captainId   String?
   isEnabled   Boolean  @default(true)
   

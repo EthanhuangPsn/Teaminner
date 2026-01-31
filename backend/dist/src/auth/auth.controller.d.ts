@@ -1,25 +1,67 @@
 import { AuthService } from './auth.service';
 import { GuestLoginDto } from './dto/guest-login.dto';
+import { RegisterDto } from './dto/register.dto';
+import { LoginDto } from './dto/login.dto';
 export declare class AuthController {
     private readonly authService;
     constructor(authService: AuthService);
-    guestLogin(dto: GuestLoginDto): Promise<{
+    register(registerDto: RegisterDto): Promise<{
         access_token: string;
         user: {
+            id: any;
+            username: any;
+            avatar: any;
+            accountType: any;
+            accountRole: any;
+        };
+    }>;
+    login(loginDto: LoginDto, ip: string, fingerprint?: string): Promise<{
+        access_token: string;
+        user: {
+            id: any;
+            username: any;
+            avatar: any;
+            accountType: any;
+            accountRole: any;
+        };
+    }>;
+    guestLogin(dto: GuestLoginDto, ip: string, fingerprint?: string): Promise<{
+        access_token: string;
+        user: {
+            id: any;
+            username: any;
+            avatar: any;
+            accountType: any;
+            accountRole: any;
+        };
+    }>;
+    autoLogin(ip: string, fingerprint?: string): Promise<{
+        access_token: string;
+        user: {
+            id: any;
+            username: any;
+            avatar: any;
+            accountType: any;
+            accountRole: any;
+        };
+    } | null>;
+    getProfile(auth: string): Promise<{
+        user: {
             id: string;
-            createdAt: Date;
-            updatedAt: Date;
             username: string;
             avatar: string | null;
-            micEnabled: boolean;
-            speakerEnabled: boolean;
-            isSpeaking: boolean;
             accountType: string;
             accountRole: string;
-            roomRole: string | null;
-            teamId: string | null;
-            isOnline: boolean;
-            roomId: string | null;
+        };
+    } | null>;
+    purgeData(): Promise<{
+        message: string;
+        backupFile: string;
+        purgedCounts: {
+            users: number;
+            rooms: number;
+            teams: number;
+            ipBindings: number;
         };
     }>;
 }

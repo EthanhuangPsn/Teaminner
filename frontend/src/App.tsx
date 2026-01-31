@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Layout, Button, Input, Modal, message } from 'antd';
+import { Layout, Button, Input, Modal, message, Typography, Space, Tag } from 'antd';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from './store/authStore';
 import { useRoomStore } from './store/roomStore';
@@ -7,12 +7,15 @@ import RoomList from './pages/RoomList';
 import RoomPage from './pages/RoomPage';
 
 const { Header, Content, Footer } = Layout;
+const { Title } = Typography;
 
 const App: React.FC = () => {
-  const { user, token, initAuth, guestLogin, logout } = useAuthStore();
+  const { user, token, initialized, initAuth, guestLogin, register, login, logout } = useAuthStore();
   const { currentRoom, connectSocket, disconnectSocket } = useRoomStore();
-  const [isLoginModalVisible, setIsLoginModalVisible] = useState(false);
-  const [guestName, setGuestName] = useState('');
+  const [isAuthModalVisible, setIsAuthModalVisible] = useState(false);
+  const [authMode, setAuthMode] = useState<'login' | 'register' | 'guest'>('guest');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -31,26 +34,61 @@ const App: React.FC = () => {
   // 处理登录后的跳转
   useEffect(() => {
     if (user && location.pathname === '/') {
-      // 如果已登录且在首页，且有当前房间，跳转到房间
       if (currentRoom) {
         navigate(`/room/${currentRoom.id}`);
       }
     }
   }, [user, currentRoom, location.pathname]);
 
-  const handleGuestLogin = async () => {
+  if (!initialized) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <Title level={2}>正在加载语音服务...</Title>
+      </div>
+    );
+  }
+
+  const handleAuth = async () => {
     try {
-      await guestLogin(guestName);
-      setIsLoginModalVisible(false);
+      if (authMode === 'guest') {
+        await guestLogin(username);
+      } else if (authMode === 'login') {
+        await login(username, password);
+      } else if (authMode === 'register') {
+        await register(username, password);
+      }
+      setIsAuthModalVisible(false);
+      setUsername('');
+      setPassword('');
       message.success('登录成功');
-    } catch (error) {
-      message.error('登录失败');
+    } catch (error: any) {
+      message.error(error.response?.data?.message || '操作失败');
     }
   };
 
   const handleLogout = () => {
     logout();
     navigate('/');
+  };
+
+  const handlePurgeData = async () => {
+    Modal.confirm({
+      title: '危险操作：清理所有数据',
+      content: '这将备份并删除所有用户、房间、编队和登录记录。此操作不可撤销（除非从备份文件手动恢复）。确定要继续吗？',
+      okText: '确定清理',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          const response = await api.post('/auth/purge-data');
+          message.success(`数据清理成功！已备份至: ${response.data.backupFile}`);
+          logout();
+          navigate('/');
+        } catch (error: any) {
+          message.error(error.response?.data?.message || '清理失败');
+        }
+      },
+    });
   };
 
   return (
@@ -62,11 +100,23 @@ const App: React.FC = () => {
         <div>
           {user ? (
             <div style={{ color: 'white' }}>
-              <span style={{ marginRight: '16px' }}>{user.username}</span>
-              <Button type="primary" danger onClick={handleLogout}>退出</Button>
+              <span style={{ marginRight: '16px' }}>
+                {user.username} {user.accountRole === 'admin' && <Tag color="red">管理员</Tag>}
+              </span>
+              <Space>
+                {user.accountRole === 'admin' && (
+                  <Button type="default" danger onClick={handlePurgeData}>
+                    清理全站数据
+                  </Button>
+                )}
+                <Button type="primary" danger onClick={handleLogout}>退出</Button>
+              </Space>
             </div>
           ) : (
-            <Button type="primary" onClick={() => setIsLoginModalVisible(true)}>游客登录</Button>
+            <Space>
+              <Button type="link" style={{ color: 'white' }} onClick={() => { setAuthMode('login'); setIsAuthModalVisible(true); }}>登录</Button>
+              <Button type="primary" onClick={() => { setAuthMode('guest'); setIsAuthModalVisible(true); }}>立即进入</Button>
+            </Space>
           )}
         </div>
       </Header>
@@ -74,10 +124,15 @@ const App: React.FC = () => {
         {!user ? (
           <div style={{ textAlign: 'center', marginTop: '100px', background: '#fff', padding: '50px', borderRadius: '8px' }}>
             <h1>欢迎使用游戏语音服务</h1>
-            <p>请先登录以进入房间</p>
-            <Button type="primary" size="large" onClick={() => setIsLoginModalVisible(true)}>
-              立即进入
-            </Button>
+            <p>即刻加入多人语音，支持编队管控</p>
+            <Space size="large" style={{ marginTop: '24px' }}>
+              <Button type="primary" size="large" onClick={() => { setAuthMode('guest'); setIsAuthModalVisible(true); }}>
+                游客进入
+              </Button>
+              <Button size="large" onClick={() => { setAuthMode('login'); setIsAuthModalVisible(true); }}>
+                账号登录
+              </Button>
+            </Space>
           </div>
         ) : (
           <div style={{ maxWidth: '1400px', margin: '0 auto', width: '100%' }}>
@@ -91,17 +146,46 @@ const App: React.FC = () => {
       <Footer style={{ textAlign: 'center' }}>Game Voice Service ©2026 Created by AI Assistant</Footer>
 
       <Modal
-        title="游客登录"
-        open={isLoginModalVisible}
-        onOk={handleGuestLogin}
-        onCancel={() => setIsLoginModalVisible(false)}
+        title={authMode === 'guest' ? '游客进入' : authMode === 'login' ? '账号登录' : '注册账号'}
+        open={isAuthModalVisible}
+        onOk={handleAuth}
+        onCancel={() => setIsAuthModalVisible(false)}
+        okText={authMode === 'register' ? '注册并登录' : '进入'}
       >
-        <Input
-          placeholder="请输入你的昵称 (可选)"
-          value={guestName}
-          onChange={(e) => setGuestName(e.target.value)}
-          onPressEnter={handleGuestLogin}
-        />
+        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <div>
+            <div style={{ marginBottom: '8px' }}>昵称/账号</div>
+            <Input
+              placeholder={authMode === 'guest' ? '请输入昵称 (可选)' : '请输入账号'}
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              onPressEnter={handleAuth}
+            />
+          </div>
+          
+          {authMode !== 'guest' && (
+            <div>
+              <div style={{ marginBottom: '8px' }}>密码</div>
+              <Input.Password
+                placeholder="请输入密码"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onPressEnter={handleAuth}
+              />
+            </div>
+          )}
+
+          {authMode === 'login' && (
+            <div style={{ textAlign: 'right' }}>
+              <Button type="link" onClick={() => setAuthMode('register')}>还没有账号？立即注册</Button>
+            </div>
+          )}
+          {authMode === 'register' && (
+            <div style={{ textAlign: 'right' }}>
+              <Button type="link" onClick={() => setAuthMode('login')}>已有账号？去登录</Button>
+            </div>
+          )}
+        </Space>
       </Modal>
     </Layout>
   );

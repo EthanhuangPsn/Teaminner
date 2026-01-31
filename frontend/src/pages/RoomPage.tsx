@@ -55,9 +55,9 @@ const RoomPage: React.FC = () => {
     }
   }, [socket, id, user]);
 
-  if (!currentRoom || !user) return null;
+  // 移除第 58 行附近的早期 return null
 
-  const isLeader = currentRoom.leaderId === user.id;
+  const isLeader = currentRoom?.leaderId === user?.id;
 
   const handleLeave = async () => {
     await leaveRoom();
@@ -190,7 +190,15 @@ const RoomPage: React.FC = () => {
 
   }, [currentRoom, user, speakerOn]);
 
-  const unassignedUsers = currentRoom.users.filter(u => !u.teamId);
+  const unassignedUsers = currentRoom?.users?.filter(u => !u.teamId) || [];
+
+  if (!currentRoom || !user) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
+        <Text type="secondary">正在退出房间...</Text>
+      </div>
+    );
+  }
 
   return (
     <Layout style={{ background: '#fff', borderRadius: '8px', overflow: 'hidden', minHeight: '80vh', border: '1px solid #f0f0f0' }}>

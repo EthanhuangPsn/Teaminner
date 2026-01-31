@@ -11,9 +11,13 @@ export declare class TeamsController {
         micEnabled: boolean;
         speakerEnabled: boolean;
         isSpeaking: boolean;
+        password: string | null;
         accountType: string;
         accountRole: string;
         roomRole: string | null;
+        lastIp: string | null;
+        deviceFingerprint: string | null;
+        lastActiveAt: Date;
         teamId: string | null;
         isOnline: boolean;
         roomId: string | null;
@@ -28,9 +32,13 @@ export declare class TeamsController {
         micEnabled: boolean;
         speakerEnabled: boolean;
         isSpeaking: boolean;
+        password: string | null;
         accountType: string;
         accountRole: string;
         roomRole: string | null;
+        lastIp: string | null;
+        deviceFingerprint: string | null;
+        lastActiveAt: Date;
         teamId: string | null;
         isOnline: boolean;
         roomId: string | null;
