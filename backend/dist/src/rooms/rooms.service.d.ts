@@ -92,6 +92,7 @@ export declare class RoomsService {
         createdAt: Date;
         updatedAt: Date;
     }>;
+    clearAllUserStatuses(): Promise<void>;
     joinRoom(roomId: string, userId: string): Promise<{
         users: {
             id: string;

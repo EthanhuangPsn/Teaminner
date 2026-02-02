@@ -24,6 +24,17 @@ export class AudioService implements OnModuleInit {
 
   async onModuleInit() {
     await this.createWorker();
+    await this.clearUserStatuses();
+  }
+
+  private async clearUserStatuses() {
+    try {
+      // 启动时清除所有用户的房间状态和麦克风状态，防止数据库残留导致逻辑错误
+      await this.roomsService.clearAllUserStatuses();
+      this.logger.log('All user statuses cleared on startup');
+    } catch (error) {
+      this.logger.error('Failed to clear user statuses on startup', error);
+    }
   }
 
   private async createWorker() {
@@ -46,22 +57,26 @@ export class AudioService implements OnModuleInit {
       // 为每个房间创建音量观察器
       const audioLevelObserver = await router.createAudioLevelObserver({
         interval: 300, // 每 300ms 检测一次
-        threshold: -60, // 音量阈值（dB）
+        threshold: -60, // 恢复正常阈值
       });
 
       audioLevelObserver.on('volumes', (volumes) => {
-        const { producer, volume } = volumes[0];
-        // 找到该 producer 对应的用户
-        for (const [userId, p] of this.producers.entries()) {
-          if (p.id === producer.id) {
-            // 广播该用户正在说话
-            this.gatewayService.broadcastUserSpeaking(roomId, userId, true);
+        if (volumes.length === 0) return;
+        
+        for (const volumeInfo of volumes) {
+          const { producer, volume } = volumeInfo;
+          // 恢复正常判断阈值
+          if (volume > -60) { 
+            for (const [userId, p] of this.producers.entries()) {
+              if (p.id === producer.id) {
+                this.gatewayService.broadcastUserSpeaking(roomId, userId, true);
+              }
+            }
           }
         }
       });
 
       audioLevelObserver.on('silence', () => {
-        // 全员静音通知（或根据需要细化）
         this.gatewayService.broadcastUserSpeaking(roomId, null, false);
       });
 
@@ -74,6 +89,10 @@ export class AudioService implements OnModuleInit {
   async createWebRtcTransport(roomId: string) {
     const router = await this.getOrCreateRouter(roomId);
     const transport = await router.createWebRtcTransport(config.webRtcTransport);
+
+    const listenIp = config.webRtcTransport.listenIps?.[0];
+    const announcedIp = typeof listenIp === 'object' ? listenIp.announcedIp : listenIp;
+    this.logger.log(`Created WebRtcTransport ${transport.id} for room ${roomId}. Announced IP: ${announcedIp}`);
 
     this.transports.set(transport.id, transport);
 
@@ -103,6 +122,7 @@ export class AudioService implements OnModuleInit {
 
     const producer = await transport.produce({ kind, rtpParameters });
     this.producers.set(userId, producer);
+    this.logger.log(`Producer created for user ${userId} in room ${roomId}`);
 
     // 将新 Producer 加入音量观察器
     const observer = this.audioLevelObservers.get(roomId);
@@ -115,6 +135,9 @@ export class AudioService implements OnModuleInit {
       this.producers.delete(userId);
     });
 
+    // 触发路由更新
+    await this.updateRouting(roomId);
+
     return { id: producer.id };
   }
 
@@ -122,7 +145,10 @@ export class AudioService implements OnModuleInit {
     const router = await this.getOrCreateRouter(roomId);
     const producer = this.producers.get(producerUserId);
 
-    if (!producer) throw new Error(`Producer for user ${producerUserId} not found`);
+    if (!producer) {
+      this.logger.warn(`createConsumer: Producer for user ${producerUserId} not found. Available users: ${Array.from(this.producers.keys()).join(', ')}`);
+      throw new Error(`Producer for user ${producerUserId} not found`);
+    }
 
     if (!router.canConsume({ producerId: producer.id, rtpCapabilities })) {
       throw new Error('cannot consume');
@@ -145,7 +171,10 @@ export class AudioService implements OnModuleInit {
       userConsumers.set(producer.id, consumer);
     }
 
+    this.logger.log(`Consumer created: user ${userId} consuming user ${producerUserId}`);
+
     consumer.on('transportclose', () => {
+      this.logger.log(`Consumer closed due to transport close: user ${userId} consuming user ${producerUserId}`);
       consumer.close();
       this.consumers.get(userId)?.delete(producer.id);
     });
@@ -159,9 +188,18 @@ export class AudioService implements OnModuleInit {
   }
 
   async resumeConsumer(userId: string, producerId: string) {
-    const consumer = this.consumers.get(userId)?.get(producerId);
+    const userConsumers = this.consumers.get(userId);
+    if (!userConsumers) {
+      this.logger.warn(`resumeConsumer: No consumers found for user ${userId}`);
+      return;
+    }
+    const consumer = userConsumers.get(producerId);
     if (consumer) {
+      this.logger.log(`Resuming consumer: user ${userId} consuming producer ${producerId}`);
       await consumer.resume();
+      this.logger.log(`Consumer resumed: user ${userId} consuming producer ${producerId}, paused: ${consumer.paused}`);
+    } else {
+      this.logger.warn(`resumeConsumer: Consumer not found for user ${userId} and producer ${producerId}`);
     }
   }
 
@@ -177,10 +215,14 @@ export class AudioService implements OnModuleInit {
     if (!room) return;
 
     const users = room.users;
+    this.logger.log(`Updating routing for room ${roomId}. Users in room: ${users.length}`);
     
     for (const userA of users) {
       const userAConsumers = this.consumers.get(userA.id);
-      if (!userAConsumers) continue;
+      if (!userAConsumers) {
+        this.logger.debug(`No consumers map for user ${userA.id}, skipping routing update for them`);
+        continue;
+      }
 
       for (const userB of users) {
         if (userA.id === userB.id) continue;
@@ -193,9 +235,15 @@ export class AudioService implements OnModuleInit {
 
         const canCommunicate = this.checkCommunication(userA, userB, room.status);
         if (canCommunicate) {
-          await consumer.resume();
+          if (consumer.paused) {
+            this.logger.log(`Resuming consumer for user ${userA.id} from producer of user ${userB.id} (routing update)`);
+            await consumer.resume();
+          }
         } else {
-          await consumer.pause();
+          if (!consumer.paused) {
+            this.logger.log(`Pausing consumer for user ${userA.id} from producer of user ${userB.id} (routing update)`);
+            await consumer.pause();
+          }
         }
       }
     }
@@ -204,27 +252,27 @@ export class AudioService implements OnModuleInit {
   private checkCommunication(userA: any, userB: any, roomStatus: string): boolean {
     if (roomStatus === 'preparing') return true;
     
-    // Unassigned users in assault mode cannot communicate
+    // 未分队用户在攻坚模式下无法通信
     if (!userA.teamId && userA.roomRole !== 'leader') return false;
     if (!userB.teamId && userB.roomRole !== 'leader') return false;
 
-    // Assault mode rules (Dual-way)
+    // 攻坚模式规则 (双向通信)
     
-    // Leader <-> All Captains
+    // 团长 <-> 所有队长
     if (userA.roomRole === 'leader' && userB.roomRole === 'captain') return true;
     if (userB.roomRole === 'leader' && userA.roomRole === 'captain') return true;
     
-    // Captain <-> Captain
+    // 队长 <-> 队长
     if (userA.roomRole === 'captain' && userB.roomRole === 'captain') return true;
     
-    // Captain <-> Team Members (same team)
+    // 队长 <-> 同队队员
     if (userA.roomRole === 'captain' && userB.teamId === userA.teamId) return true;
     if (userB.roomRole === 'captain' && userA.teamId === userB.teamId) return true;
     
-    // Member <-> Member (same team)
+    // 队员 <-> 队员 (同队)
     if (userA.teamId === userB.teamId && userA.teamId !== null) return true;
 
-    // Leader <-> Team Members (same team)
+    // 团长 <-> 同队队员 (如果团长兼任队长或加入小队)
     if (userA.roomRole === 'leader' && userA.teamId && userB.teamId === userA.teamId) return true;
     if (userB.roomRole === 'leader' && userB.teamId && userA.teamId === userB.teamId) return true;
 

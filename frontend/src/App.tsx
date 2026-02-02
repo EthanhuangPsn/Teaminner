@@ -11,11 +11,12 @@ const { Title } = Typography;
 
 const App: React.FC = () => {
   const { user, token, initialized, initAuth, guestLogin, register, login, logout } = useAuthStore();
-  const { currentRoom, connectSocket, disconnectSocket } = useRoomStore();
+  const { currentRoom, connectSocket, disconnectSocket, resetRoom } = useRoomStore();
   const [isAuthModalVisible, setIsAuthModalVisible] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'register' | 'guest'>('guest');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmLoading, setConfirmLoading] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -49,6 +50,16 @@ const App: React.FC = () => {
   }
 
   const handleAuth = async () => {
+    if (!username && authMode !== 'guest') {
+      message.warning('请输入账号');
+      return;
+    }
+    if (!password && authMode !== 'guest') {
+      message.warning('请输入密码');
+      return;
+    }
+
+    setConfirmLoading(true);
     try {
       if (authMode === 'guest') {
         await guestLogin(username);
@@ -62,12 +73,16 @@ const App: React.FC = () => {
       setPassword('');
       message.success('登录成功');
     } catch (error: any) {
-      message.error(error.response?.data?.message || '操作失败');
+      console.error('Auth error:', error);
+      message.error(error.response?.data?.message || '操作失败，请检查网络或账号密码');
+    } finally {
+      setConfirmLoading(false);
     }
   };
 
   const handleLogout = () => {
     logout();
+    resetRoom();
     navigate('/');
   };
 
@@ -145,13 +160,14 @@ const App: React.FC = () => {
       </Content>
       <Footer style={{ textAlign: 'center' }}>Game Voice Service ©2026 Created by AI Assistant</Footer>
 
-      <Modal
-        title={authMode === 'guest' ? '游客进入' : authMode === 'login' ? '账号登录' : '注册账号'}
-        open={isAuthModalVisible}
-        onOk={handleAuth}
-        onCancel={() => setIsAuthModalVisible(false)}
-        okText={authMode === 'register' ? '注册并登录' : '进入'}
-      >
+             <Modal
+               title={authMode === 'guest' ? '游客进入' : authMode === 'login' ? '账号登录' : '注册账号'}
+               open={isAuthModalVisible}
+               onOk={handleAuth}
+               onCancel={() => setIsAuthModalVisible(false)}
+               confirmLoading={confirmLoading}
+               okText={authMode === 'register' ? '注册并登录' : '进入'}
+             >
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
           <div>
             <div style={{ marginBottom: '8px' }}>昵称/账号</div>

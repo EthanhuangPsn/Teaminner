@@ -67,6 +67,23 @@ let RoomsService = class RoomsService {
         }
         return room;
     }
+    async clearAllUserStatuses() {
+        await this.prisma.user.updateMany({
+            data: {
+                roomId: null,
+                teamId: null,
+                roomRole: null,
+                micEnabled: false,
+                speakerEnabled: true,
+            },
+        });
+        await this.prisma.room.updateMany({
+            data: {
+                leaderId: null,
+                status: 'preparing',
+            },
+        });
+    }
     async joinRoom(roomId, userId) {
         const room = await this.prisma.room.findUnique({
             where: { id: roomId },
@@ -80,9 +97,17 @@ let RoomsService = class RoomsService {
         if (room.users.length >= room.maxUsers) {
             throw new common_1.BadRequestException('Room is full');
         }
+        const userExists = await this.prisma.user.findUnique({ where: { id: userId } });
+        if (!userExists) {
+            throw new common_1.UnauthorizedException('用户信息已失效，请重新登录');
+        }
         const user = await this.prisma.user.update({
             where: { id: userId },
-            data: { roomId },
+            data: {
+                roomId,
+                micEnabled: false,
+                speakerEnabled: true
+            },
         });
         if (!room.leaderId) {
             await this.prisma.room.update({

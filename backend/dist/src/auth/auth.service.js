@@ -136,16 +136,16 @@ let AuthService = AuthService_1 = class AuthService {
                 }
             });
         }
-        if (!user && ip && !dto.username) {
+        if (!user && ip && fingerprint && !dto.username) {
             const binding = await this.prisma.ipBinding.findUnique({
-                where: { ip },
+                where: {
+                    ip_deviceFingerprint: { ip, deviceFingerprint: fingerprint }
+                },
             });
             if (binding) {
-                if (!fingerprint || !binding.deviceFingerprint || binding.deviceFingerprint === fingerprint) {
-                    user = await this.prisma.user.findUnique({
-                        where: { id: binding.userId },
-                    });
-                }
+                user = await this.prisma.user.findUnique({
+                    where: { id: binding.userId },
+                });
             }
         }
         if (!user) {
@@ -172,14 +172,15 @@ let AuthService = AuthService_1 = class AuthService {
         return this.generateToken(user);
     }
     async autoLoginByIp(ip, fingerprint) {
+        if (!fingerprint)
+            return null;
         const binding = await this.prisma.ipBinding.findUnique({
-            where: { ip },
+            where: {
+                ip_deviceFingerprint: { ip, deviceFingerprint: fingerprint }
+            },
         });
         if (!binding)
             return null;
-        if (fingerprint && binding.deviceFingerprint && binding.deviceFingerprint !== fingerprint) {
-            return null;
-        }
         const user = await this.prisma.user.findUnique({
             where: { id: binding.userId },
         });
@@ -210,11 +211,14 @@ let AuthService = AuthService_1 = class AuthService {
         }
     }
     async updateIpBinding(userId, ip, fingerprint) {
+        if (!fingerprint)
+            return;
         await this.prisma.ipBinding.upsert({
-            where: { ip },
+            where: {
+                ip_deviceFingerprint: { ip, deviceFingerprint: fingerprint }
+            },
             update: {
                 userId,
-                deviceFingerprint: fingerprint,
                 lastActiveAt: new Date(),
             },
             create: {

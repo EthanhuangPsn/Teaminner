@@ -17,6 +17,13 @@ export class WebRTCManager {
     this.userId = userId;
   }
 
+  public getIceState() {
+    return {
+      send: this.sendTransport?.connectionState || 'none',
+      recv: this.recvTransport?.connectionState || 'none'
+    };
+  }
+
   async init() {
     try {
       // 1. Get router RTP capabilities
@@ -42,7 +49,13 @@ export class WebRTCManager {
   private async createSendTransport() {
     const data = await this.emitPromise('createWebRtcTransport', this.roomId);
     
-    this.sendTransport = this.device!.createSendTransport(data);
+    this.sendTransport = this.device!.createSendTransport({
+      ...data,
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
+    });
 
     this.sendTransport.on('connect', async ({ dtlsParameters }, callback, errback) => {
       try {
@@ -51,6 +64,10 @@ export class WebRTCManager {
       } catch (error: any) {
         errback(error);
       }
+    });
+
+    this.sendTransport.on('connectionstatechange', (state) => {
+      // console.log('Send transport connection state:', state);
     });
 
     this.sendTransport.on('produce', async ({ kind, rtpParameters }, callback, errback) => {
@@ -72,7 +89,13 @@ export class WebRTCManager {
   private async createRecvTransport() {
     const data = await this.emitPromise('createWebRtcTransport', this.roomId);
     
-    this.recvTransport = this.device!.createRecvTransport(data);
+    this.recvTransport = this.device!.createRecvTransport({
+      ...data,
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
+    });
 
     this.recvTransport.on('connect', async ({ dtlsParameters }, callback, errback) => {
       try {
@@ -82,10 +105,16 @@ export class WebRTCManager {
         errback(error);
       }
     });
+
+    this.recvTransport.on('connectionstatechange', (state) => {
+      // console.log('Recv transport connection state:', state);
+    });
   }
 
   async startProducing(track: MediaStreamTrack) {
     if (!this.sendTransport) return;
+    
+    console.log(`Starting to produce track: ${track.kind}, id: ${track.id}, enabled: ${track.enabled}, state: ${track.readyState}`);
     
     this.producer = await this.sendTransport.produce({ track });
     

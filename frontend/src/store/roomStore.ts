@@ -24,6 +24,7 @@ interface RoomState {
   leaveRoom: () => Promise<void>;
   connectSocket: (token: string) => void;
   disconnectSocket: () => void;
+  resetRoom: () => void;
   toggleStatus: (status: 'preparing' | 'assaulting') => Promise<void>;
 }
 
@@ -68,10 +69,17 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     try {
       await api.post('/rooms/leave');
       socket?.emit('unsubscribe-room', currentRoom.id);
-      set({ currentRoom: null });
     } catch (error) {
       console.error('Leave room failed:', error);
+    } finally {
+      set({ currentRoom: null });
     }
+  },
+
+  resetRoom: () => {
+    const { socket } = get();
+    socket?.disconnect();
+    set({ currentRoom: null, socket: null });
   },
 
   connectSocket: (token) => {

@@ -14,6 +14,7 @@ export declare class AudioService implements OnModuleInit {
     private readonly logger;
     constructor(roomsService: RoomsService, gatewayService: GatewayService);
     onModuleInit(): Promise<void>;
+    private clearUserStatuses;
     private createWorker;
     getOrCreateRouter(roomId: string): Promise<mediasoup.types.Router>;
     createWebRtcTransport(roomId: string): Promise<{

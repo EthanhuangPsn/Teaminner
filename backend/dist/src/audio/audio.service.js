@@ -68,6 +68,16 @@ let AudioService = AudioService_1 = class AudioService {
     }
     async onModuleInit() {
         await this.createWorker();
+        await this.clearUserStatuses();
+    }
+    async clearUserStatuses() {
+        try {
+            await this.roomsService.clearAllUserStatuses();
+            this.logger.log('All user statuses cleared on startup');
+        }
+        catch (error) {
+            this.logger.error('Failed to clear user statuses on startup', error);
+        }
     }
     async createWorker() {
         this.worker = await mediasoup.createWorker(mediasoup_config_1.config.worker);
@@ -87,10 +97,16 @@ let AudioService = AudioService_1 = class AudioService {
                 threshold: -60,
             });
             audioLevelObserver.on('volumes', (volumes) => {
-                const { producer, volume } = volumes[0];
-                for (const [userId, p] of this.producers.entries()) {
-                    if (p.id === producer.id) {
-                        this.gatewayService.broadcastUserSpeaking(roomId, userId, true);
+                if (volumes.length === 0)
+                    return;
+                for (const volumeInfo of volumes) {
+                    const { producer, volume } = volumeInfo;
+                    if (volume > -60) {
+                        for (const [userId, p] of this.producers.entries()) {
+                            if (p.id === producer.id) {
+                                this.gatewayService.broadcastUserSpeaking(roomId, userId, true);
+                            }
+                        }
                     }
                 }
             });
@@ -105,6 +121,9 @@ let AudioService = AudioService_1 = class AudioService {
     async createWebRtcTransport(roomId) {
         const router = await this.getOrCreateRouter(roomId);
         const transport = await router.createWebRtcTransport(mediasoup_config_1.config.webRtcTransport);
+        const listenIp = mediasoup_config_1.config.webRtcTransport.listenIps?.[0];
+        const announcedIp = typeof listenIp === 'object' ? listenIp.announcedIp : listenIp;
+        this.logger.log(`Created WebRtcTransport ${transport.id} for room ${roomId}. Announced IP: ${announcedIp}`);
         this.transports.set(transport.id, transport);
         transport.on('dtlsstatechange', (dtlsState) => {
             if (dtlsState === 'closed') {
@@ -130,6 +149,7 @@ let AudioService = AudioService_1 = class AudioService {
             throw new Error(`Transport ${transportId} not found`);
         const producer = await transport.produce({ kind, rtpParameters });
         this.producers.set(userId, producer);
+        this.logger.log(`Producer created for user ${userId} in room ${roomId}`);
         const observer = this.audioLevelObservers.get(roomId);
         if (observer && kind === 'audio') {
             await observer.addProducer({ producerId: producer.id });
@@ -138,13 +158,16 @@ let AudioService = AudioService_1 = class AudioService {
             producer.close();
             this.producers.delete(userId);
         });
+        await this.updateRouting(roomId);
         return { id: producer.id };
     }
     async createConsumer(roomId, transportId, producerUserId, rtpCapabilities, userId) {
         const router = await this.getOrCreateRouter(roomId);
         const producer = this.producers.get(producerUserId);
-        if (!producer)
+        if (!producer) {
+            this.logger.warn(`createConsumer: Producer for user ${producerUserId} not found. Available users: ${Array.from(this.producers.keys()).join(', ')}`);
             throw new Error(`Producer for user ${producerUserId} not found`);
+        }
         if (!router.canConsume({ producerId: producer.id, rtpCapabilities })) {
             throw new Error('cannot consume');
         }
@@ -163,7 +186,9 @@ let AudioService = AudioService_1 = class AudioService {
         if (userConsumers) {
             userConsumers.set(producer.id, consumer);
         }
+        this.logger.log(`Consumer created: user ${userId} consuming user ${producerUserId}`);
         consumer.on('transportclose', () => {
+            this.logger.log(`Consumer closed due to transport close: user ${userId} consuming user ${producerUserId}`);
             consumer.close();
             this.consumers.get(userId)?.delete(producer.id);
         });
@@ -175,9 +200,19 @@ let AudioService = AudioService_1 = class AudioService {
         };
     }
     async resumeConsumer(userId, producerId) {
-        const consumer = this.consumers.get(userId)?.get(producerId);
+        const userConsumers = this.consumers.get(userId);
+        if (!userConsumers) {
+            this.logger.warn(`resumeConsumer: No consumers found for user ${userId}`);
+            return;
+        }
+        const consumer = userConsumers.get(producerId);
         if (consumer) {
+            this.logger.log(`Resuming consumer: user ${userId} consuming producer ${producerId}`);
             await consumer.resume();
+            this.logger.log(`Consumer resumed: user ${userId} consuming producer ${producerId}, paused: ${consumer.paused}`);
+        }
+        else {
+            this.logger.warn(`resumeConsumer: Consumer not found for user ${userId} and producer ${producerId}`);
         }
     }
     async pauseConsumer(userId, producerId) {
@@ -191,10 +226,13 @@ let AudioService = AudioService_1 = class AudioService {
         if (!room)
             return;
         const users = room.users;
+        this.logger.log(`Updating routing for room ${roomId}. Users in room: ${users.length}`);
         for (const userA of users) {
             const userAConsumers = this.consumers.get(userA.id);
-            if (!userAConsumers)
+            if (!userAConsumers) {
+                this.logger.debug(`No consumers map for user ${userA.id}, skipping routing update for them`);
                 continue;
+            }
             for (const userB of users) {
                 if (userA.id === userB.id)
                     continue;
@@ -206,10 +244,16 @@ let AudioService = AudioService_1 = class AudioService {
                     continue;
                 const canCommunicate = this.checkCommunication(userA, userB, room.status);
                 if (canCommunicate) {
-                    await consumer.resume();
+                    if (consumer.paused) {
+                        this.logger.log(`Resuming consumer for user ${userA.id} from producer of user ${userB.id} (routing update)`);
+                        await consumer.resume();
+                    }
                 }
                 else {
-                    await consumer.pause();
+                    if (!consumer.paused) {
+                        this.logger.log(`Pausing consumer for user ${userA.id} from producer of user ${userB.id} (routing update)`);
+                        await consumer.pause();
+                    }
                 }
             }
         }

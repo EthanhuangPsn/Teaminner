@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Inject, forwardRef, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateRoomDto } from './dto/create-room.dto';
 import { UpdateRoomDto } from './dto/update-room.dto';
@@ -62,6 +62,26 @@ export class RoomsService {
     return room;
   }
 
+  async clearAllUserStatuses() {
+    // 重置所有用户的房间、角色和麦克风状态
+    await this.prisma.user.updateMany({
+      data: {
+        roomId: null,
+        teamId: null,
+        roomRole: null,
+        micEnabled: false,
+        speakerEnabled: true,
+      },
+    });
+    // 重置所有房间的团长
+    await this.prisma.room.updateMany({
+      data: {
+        leaderId: null,
+        status: 'preparing',
+      },
+    });
+  }
+
   async joinRoom(roomId: string, userId: string) {
     const room = await this.prisma.room.findUnique({
       where: { id: roomId },
@@ -79,9 +99,18 @@ export class RoomsService {
     }
 
     // Update user's room
+    const userExists = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!userExists) {
+      throw new UnauthorizedException('用户信息已失效，请重新登录');
+    }
+
     const user = await this.prisma.user.update({
       where: { id: userId },
-      data: { roomId },
+      data: { 
+        roomId,
+        micEnabled: false,      // 重置麦克风状态
+        speakerEnabled: true    // 默认开启收听
+      },
     });
 
     // If no leader, set as leader

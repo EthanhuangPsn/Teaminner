@@ -21,9 +21,110 @@ const RoomPage: React.FC = () => {
   const [speakerOn, setSpeakerOn] = useState(true);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [speakingUsers, setSpeakingUsers] = useState<Set<string>>(new Set());
+  const [localSpeaking, setLocalSpeaking] = useState(false);
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
+  const [iceState, setIceState] = useState({ send: 'none', recv: 'none' });
   
   const webrtcRef = useRef<WebRTCManager | null>(null);
+  const initializingRef = useRef(false);
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
+  const audioContainerRef = useRef<HTMLDivElement | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+
+  // 定期更新 ICE 状态
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (webrtcRef.current) {
+        setIceState(webrtcRef.current.getIceState());
+      }
+    }, 2000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // 获取设备列表
+  useEffect(() => {
+    const getDevices = async () => {
+      try {
+        // 先请求一次权限，否则拿不到设备 label
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+        const allDevices = await navigator.mediaDevices.enumerateDevices();
+        const audioDevices = allDevices.filter(d => d.kind === 'audioinput');
+        setDevices(audioDevices);
+        if (audioDevices.length > 0 && !selectedDeviceId) {
+          setSelectedDeviceId(audioDevices[0].deviceId);
+        }
+      } catch (err) {
+        console.warn('获取设备列表失败:', err);
+      }
+    };
+    getDevices();
+  }, []);
+
+  useEffect(() => {
+    if (localStream && micOn) {
+      const initAudioContext = async () => {
+        if (!audioContextRef.current) {
+          audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+        }
+        const ctx = audioContextRef.current;
+        if (ctx.state === 'suspended') {
+          await ctx.resume();
+        }
+        
+        const source = ctx.createMediaStreamSource(localStream);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+        analyserRef.current = analyser;
+
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+
+        const checkVolume = () => {
+          if (!micOn || !analyserRef.current) return;
+          analyser.getByteFrequencyData(dataArray);
+          let sum = 0;
+          for (let i = 0; i < bufferLength; i++) {
+            sum += dataArray[i];
+          }
+          const average = sum / bufferLength;
+          // 调低阈值到 5，并增加日志
+          if (average > 5) {
+            setLocalSpeaking(true);
+          } else {
+            setLocalSpeaking(false);
+          }
+          requestAnimationFrame(checkVolume);
+        };
+
+        checkVolume();
+      };
+
+      initAudioContext();
+
+      return () => {
+        if (analyserRef.current) {
+          analyserRef.current.disconnect();
+          analyserRef.current = null;
+        }
+      };
+    } else {
+      setLocalSpeaking(false);
+    }
+  }, [localStream, micOn]);
+
+  // 全局点击激活音频上下文
+  useEffect(() => {
+    const handleGesture = () => {
+      if (audioContextRef.current?.state === 'suspended') {
+        audioContextRef.current.resume();
+      }
+    };
+    window.addEventListener('click', handleGesture);
+    return () => window.removeEventListener('click', handleGesture);
+  }, []);
 
   useEffect(() => {
     if (id) {
@@ -31,24 +132,43 @@ const RoomPage: React.FC = () => {
     }
   }, [id, fetchRoom]);
 
+  // 核心优化：如果进入了房间页面但不在成员列表中，自动执行加入逻辑
+  useEffect(() => {
+    if (currentRoom && user && !currentRoom.users.find(u => u.id === user.id)) {
+      console.log('Detected user not in room, joining...');
+      useRoomStore.getState().joinRoom(currentRoom.id).catch(err => {
+        message.error('自动加入房间失败');
+        navigate('/');
+      });
+    }
+  }, [currentRoom, user, navigate]);
+
   // WebRTC 初始化
   useEffect(() => {
-    if (socket && id && user && !webrtcRef.current) {
+    if (socket && id && user && !webrtcRef.current && !initializingRef.current) {
+      initializingRef.current = true;
       const manager = new WebRTCManager(socket, id, user.id);
       manager.init().then(success => {
         if (success) {
           webrtcRef.current = manager;
           console.log('WebRTC Manager initialized');
         }
+        initializingRef.current = false;
+      }).catch(() => {
+        initializingRef.current = false;
       });
 
       return () => {
         manager.close();
         webrtcRef.current = null;
+        initializingRef.current = false;
         // 清理所有音频元素
         audioElementsRef.current.forEach(audio => {
           audio.pause();
           audio.srcObject = null;
+          if (audio.parentNode) {
+            audio.parentNode.removeChild(audio);
+          }
         });
         audioElementsRef.current.clear();
       };
@@ -87,18 +207,18 @@ const RoomPage: React.FC = () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ 
           audio: {
+            deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
             echoCancellation: true,
             noiseSuppression: true,
             autoGainControl: true,
-            sampleRate: 48000,
           } 
         });
+        
         setLocalStream(stream);
         if (webrtcRef.current) {
           await webrtcRef.current.startProducing(stream.getAudioTracks()[0]);
         }
         setMicOn(true);
-        // 同步状态到后端
         await api.patch(`/users/${user.id}`, { micEnabled: true });
         message.success('麦克风已开启');
       } catch (err) {
@@ -108,7 +228,6 @@ const RoomPage: React.FC = () => {
       localStream?.getTracks().forEach(track => track.stop());
       setLocalStream(null);
       setMicOn(false);
-      // 同步状态到后端
       await api.patch(`/users/${user.id}`, { micEnabled: false });
       message.info('麦克风已关闭');
     }
@@ -155,40 +274,80 @@ const RoomPage: React.FC = () => {
     if (!currentRoom || !user || !webrtcRef.current || !speakerOn) return;
 
     currentRoom.users.forEach(async (u) => {
-      // 只有当对方开启了麦克风，且我们还没收听他时
-      if (u.id !== user.id && u.micEnabled && !audioElementsRef.current.has(u.id)) {
+      const isMe = u.id === user.id;
+      const isMicOn = u.micEnabled;
+      const alreadySubscribed = audioElementsRef.current.has(u.id);
+
+      if (!isMe && isMicOn && !alreadySubscribed) {
         try {
           const consumer = await webrtcRef.current!.consume(u.id);
           if (consumer) {
             const stream = new MediaStream([consumer.track]);
             const audio = new Audio();
             audio.srcObject = stream;
-            audio.play().catch(e => console.error('播放失败', e));
+            audio.autoplay = true;
+            
+            if (audioContainerRef.current) {
+              audioContainerRef.current.appendChild(audio);
+            }
+            
+            audio.play().catch(() => {});
             audioElementsRef.current.set(u.id, audio);
-            console.log(`正在收听用户: ${u.username}`);
           }
-        } catch (err) {
-          console.warn(`无法收听用户 ${u.username} 的音频:`, err);
-        }
+        } catch (err: any) {}
       } 
-      // 如果对方关闭了麦克风，而我们还在收听，则清理
-      else if (u.id !== user.id && !u.micEnabled && audioElementsRef.current.has(u.id)) {
+      else if (!isMe && !isMicOn && alreadySubscribed) {
         const audio = audioElementsRef.current.get(u.id);
         audio?.pause();
+        if (audio && audio.parentNode) {
+          audio.parentNode.removeChild(audio);
+        }
         audioElementsRef.current.delete(u.id);
       }
     });
 
-    // 清理那些已经不在房间的用户
+    // 清理已经离开房间的用户
     const currentMemberIds = new Set(currentRoom.users.map(u => u.id));
     audioElementsRef.current.forEach((audio, userId) => {
       if (!currentMemberIds.has(userId)) {
         audio.pause();
+        if (audio.parentNode) {
+          audio.parentNode.removeChild(audio);
+        }
         audioElementsRef.current.delete(userId);
       }
     });
 
   }, [currentRoom, user, speakerOn]);
+
+  // 计算当前“谁能听到我”列表
+  const talkableUsers = currentRoom.users.filter(u => {
+    // 1. 自己始终不显示在“可对话”列表中（避免冗余）
+    if (u.id === user.id) return false;
+
+    // 2. 如果是备战状态，所有人互通
+    if (currentRoom.status === 'preparing') return true;
+
+    // 3. 攻坚状态下的过滤逻辑（匹配后端路由算法）
+    const myRole = currentRoom.users.find(x => x.id === user.id)?.roomRole || 'member';
+    const myTeamId = currentRoom.users.find(x => x.id === user.id)?.teamId;
+    const targetRole = u.roomRole;
+    const targetTeamId = u.teamId;
+
+    // A. 团长与队长的关系
+    if (myRole === 'leader' && targetRole === 'captain') return true;
+    if (myRole === 'captain' && targetRole === 'leader') return true;
+
+    // B. 队长与队长的关系
+    if (myRole === 'captain' && targetRole === 'captain') return true;
+
+    // C. 队内关系
+    if (myTeamId && myTeamId === targetTeamId) return true;
+
+    // D. 团长如果兼任了某队队长，也能听到该队队员（后端已涵盖，这里前端简化实现）
+    
+    return false;
+  });
 
   const unassignedUsers = currentRoom?.users?.filter(u => !u.teamId) || [];
 
@@ -202,6 +361,8 @@ const RoomPage: React.FC = () => {
 
   return (
     <Layout style={{ background: '#fff', borderRadius: '8px', overflow: 'hidden', minHeight: '80vh', border: '1px solid #f0f0f0' }}>
+      {/* 隐藏的音频容器 */}
+      <div ref={audioContainerRef} style={{ display: 'none' }} />
       <Sider width={300} theme="light" style={{ borderRight: '1px solid #f0f0f0', padding: '16px', overflowY: 'auto' }}>
         <div style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Title level={4} style={{ margin: 0 }}>作战编队</Title>
@@ -238,7 +399,7 @@ const RoomPage: React.FC = () => {
                   <List.Item style={{ padding: '8px 4px' }}>
                     <List.Item.Meta
                       avatar={
-                        <Badge dot={speakingUsers.has(m.id)} color="green" offset={[-2, 28]}>
+                        <Badge dot={m.id === user.id ? localSpeaking : speakingUsers.has(m.id)} color="green" offset={[-2, 28]}>
                           <Avatar size="small" src={m.avatar} icon={<User size={12} />} />
                         </Badge>
                       }
@@ -275,7 +436,7 @@ const RoomPage: React.FC = () => {
                   <List.Item style={{ padding: '8px 4px' }}>
                     <List.Item.Meta
                       avatar={
-                        <Badge dot={speakingUsers.has(u.id)} color="green" offset={[-2, 28]}>
+                        <Badge dot={u.id === user.id ? localSpeaking : speakingUsers.has(u.id)} color="green" offset={[-2, 28]}>
                           <Avatar size="small" src={u.avatar} icon={<User size={12} />} />
                         </Badge>
                       }
@@ -336,35 +497,78 @@ const RoomPage: React.FC = () => {
           </Space>
         </div>
 
-        <div style={{ marginTop: '20px', padding: '40px', background: '#f9f9f9', borderRadius: '12px', textAlign: 'center' }}>
-          <Title level={4} style={{ marginBottom: '30px' }}>实时语音状态</Title>
+        <div style={{ marginTop: '20px', padding: '40px', background: '#f9f9f9', borderRadius: '12px', textAlign: 'center', border: '2px solid #e6f7ff' }}>
+          <div style={{ marginBottom: '20px' }}>
+            <Badge status="processing" text={<Text type="secondary">当前登录身份：<Text strong color="blue">{user.username}</Text></Text>} />
+          </div>
+          <Title level={4} style={{ marginBottom: '30px' }}>
+            {currentRoom.status === 'preparing' ? '作战广播：当前全员互通' : '指挥雷达：当前可对话成员'}
+          </Title>
           <div style={{ display: 'flex', justifyContent: 'center', gap: '32px', flexWrap: 'wrap' }}>
-            {currentRoom.users.map(u => (
-              <div key={u.id} style={{ textAlign: 'center' }}>
-                <Badge dot={speakingUsers.has(u.id)} color="green" offset={[-10, 50]}>
-                  <Avatar 
-                    size={64} 
-                    src={u.avatar} 
-                    icon={<User size={32} />} 
-                    style={{ 
-                      border: speakingUsers.has(u.id) ? '4px solid #52c41a' : '2px solid #fff',
-                      boxShadow: speakingUsers.has(u.id) ? '0 0 20px #52c41a' : '0 2px 8px rgba(0,0,0,0.1)',
-                      transition: 'all 0.3s ease',
-                      backgroundColor: u.teamId ? currentRoom.teams.find(t => t.id === u.teamId)?.teamColor : '#ccc'
-                    }} 
-                  />
-                </Badge>
-                <div style={{ marginTop: '12px' }}>
-                  <Space direction="vertical" size={0}>
-                    <Text strong={speakingUsers.has(u.id)} style={{ fontSize: '14px' }}>{u.username}</Text>
-                    <div style={{ display: 'flex', justifyContent: 'center', gap: '4px' }}>
-                      {u.id === user.id && <Tag color="blue" style={{ margin: 0, transform: 'scale(0.8)' }}>我</Tag>}
-                      {currentRoom.leaderId === u.id && <Tag color="gold" style={{ margin: 0, transform: 'scale(0.8)' }}>团长</Tag>}
-                    </div>
-                  </Space>
-                </div>
+            {talkableUsers.length === 0 ? (
+              <div style={{ padding: '20px', color: '#999' }}>
+                {currentRoom.status === 'assaulting' && !user.teamId ? '⚠️ 尚未入队，处于静默状态' : '当前暂无有效对话对象'}
               </div>
-            ))}
+            ) : (
+              talkableUsers.map(u => (
+                <div key={u.id} style={{ textAlign: 'center' }}>
+                  <Badge dot={u.id === user.id ? localSpeaking : speakingUsers.has(u.id)} color="green" offset={[-10, 50]}>
+                    <Avatar 
+                      size={64} 
+                      src={u.avatar} 
+                      icon={<User size={32} />} 
+                      style={{ 
+                        border: (u.id === user.id ? localSpeaking : speakingUsers.has(u.id)) ? '4px solid #52c41a' : '2px solid #fff',
+                        boxShadow: (u.id === user.id ? localSpeaking : speakingUsers.has(u.id)) ? '0 0 20px #52c41a' : '0 2px 8px rgba(0,0,0,0.1)',
+                        transition: 'all 0.3s ease',
+                        backgroundColor: u.teamId ? currentRoom.teams.find(t => t.id === u.teamId)?.teamColor : '#ccc'
+                      }} 
+                    />
+                  </Badge>
+                  <div style={{ marginTop: '12px' }}>
+                    <Space direction="vertical" size={0}>
+                      <Text strong={(u.id === user.id ? localSpeaking : speakingUsers.has(u.id))} style={{ fontSize: '14px' }}>{u.username}</Text>
+                      <div style={{ display: 'flex', justifyContent: 'center', gap: '4px' }}>
+                        {currentRoom.leaderId === u.id && <Tag color="gold" style={{ margin: 0, transform: 'scale(0.8)' }}>团长</Tag>}
+                        {u.roomRole === 'captain' && <Tag color="blue" style={{ margin: 0, transform: 'scale(0.8)' }}>队长</Tag>}
+                      </div>
+                    </Space>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* 音频设置与状态 */}
+        <div style={{ marginTop: '20px', padding: '16px', background: '#f0f5ff', border: '1px solid #adc6ff', borderRadius: '8px' }}>
+          <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Space>
+              <Text strong style={{ fontSize: '14px' }}>输入设备</Text>
+              <select 
+                value={selectedDeviceId} 
+                onChange={(e) => setSelectedDeviceId(e.target.value)}
+                style={{ fontSize: '14px', padding: '4px 8px', borderRadius: '4px', border: '1px solid #d9d9d9' }}
+                disabled={micOn}
+              >
+                {devices.map(d => (
+                  <option key={d.deviceId} value={d.deviceId}>{d.label || `设备 ${d.deviceId.slice(0,5)}`}</option>
+                ))}
+              </select>
+            </Space>
+            <Badge 
+              status={iceState.send === 'connected' ? 'success' : 'processing'} 
+              text={iceState.send === 'connected' ? '语音通道已加密连通' : '正在建立连接...'} 
+            />
+          </div>
+          
+          <div style={{ display: 'flex', gap: '16px' }}>
+            <Text type="secondary" style={{ fontSize: '12px' }}>
+              接收流: <Text strong>{audioElementsRef.current.size}</Text>
+            </Text>
+            <Text type="secondary" style={{ fontSize: '12px' }}>
+              网络模式: <Text strong>{iceState.send === 'connected' ? '混合模式 (UDP/TCP)' : '探测中'}</Text>
+            </Text>
           </div>
         </div>
       </Content>

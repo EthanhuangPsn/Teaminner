@@ -4,7 +4,7 @@ exports.config = void 0;
 exports.config = {
     worker: {
         rtcMinPort: 10000,
-        rtcMaxPort: 10100,
+        rtcMaxPort: 10500,
         logLevel: 'debug',
         logTags: [
             'info',
@@ -32,6 +32,9 @@ exports.config = {
                 announcedIp: '127.0.0.1',
             },
         ],
+        enableUdp: true,
+        enableTcp: true,
+        preferUdp: true,
         initialAvailableOutgoingBitrate: 1000000,
         minimumAvailableOutgoingBitrate: 600000,
         maxSctpMessageSize: 262144,

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import api from '../api/client';
+import { message } from 'antd';
 
 interface User {
   id: string;
@@ -13,6 +14,7 @@ interface AuthState {
   user: User | null;
   token: string | null;
   initialized: boolean;
+  isInitializing: boolean;
   setAuth: (user: User, token: string) => void;
   guestLogin: (username?: string) => Promise<void>;
   register: (username: string, password: string) => Promise<void>;
@@ -21,7 +23,7 @@ interface AuthState {
   initAuth: () => Promise<void>;
 }
 
-// Simple device fingerprint using localStorage
+// 回归主流：使用 localStorage，确保整个浏览器共享同一个设备标识
 const getFingerprint = () => {
   let fp = localStorage.getItem('device_fingerprint');
   if (!fp) {
@@ -35,85 +37,69 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   token: null,
   initialized: false,
+  isInitializing: false,
   setAuth: (user, token) => {
     localStorage.setItem('token', token);
     set({ user, token });
   },
   guestLogin: async (username) => {
-    try {
-      const response = await api.post('/auth/guest', { username }, {
-        headers: { 'x-device-fingerprint': getFingerprint() }
-      });
-      const { user, access_token } = response.data;
-      localStorage.setItem('token', access_token);
-      set({ user, token: access_token });
-    } catch (error) {
-      console.error('Guest login failed:', error);
-      throw error;
-    }
+    const response = await api.post('/auth/guest', { username }, {
+      headers: { 'x-device-fingerprint': getFingerprint() }
+    });
+    const { user, access_token } = response.data;
+    localStorage.setItem('token', access_token);
+    set({ user, token: access_token, initialized: true });
   },
   register: async (username, password) => {
-    try {
-      const response = await api.post('/auth/register', { username, password });
-      const { user, access_token } = response.data;
-      localStorage.setItem('token', access_token);
-      set({ user, token: access_token });
-    } catch (error) {
-      console.error('Registration failed:', error);
-      throw error;
-    }
+    const response = await api.post('/auth/register', { username, password });
+    const { user, access_token } = response.data;
+    localStorage.setItem('token', access_token);
+    set({ user, token: access_token, initialized: true });
   },
   login: async (username, password) => {
-    try {
-      const response = await api.post('/auth/login', { username, password }, {
-        headers: { 'x-device-fingerprint': getFingerprint() }
-      });
-      const { user, access_token } = response.data;
-      localStorage.setItem('token', access_token);
-      set({ user, token: access_token });
-    } catch (error) {
-      console.error('Login failed:', error);
-      throw error;
-    }
+    const response = await api.post('/auth/login', { username, password }, {
+      headers: { 'x-device-fingerprint': getFingerprint() }
+    });
+    const { user, access_token } = response.data;
+    localStorage.setItem('token', access_token);
+    set({ user, token: access_token, initialized: true });
   },
   logout: () => {
     localStorage.removeItem('token');
-    set({ user: null, token: null });
+    // 注意：退出时不一定要删除指纹，保留指纹可以让下次“自动登录”找回最后一次使用的账号
+    set({ user: null, token: null, initialized: true });
   },
   initAuth: async () => {
-    if (get().initialized) return;
+    if (get().initialized || get().isInitializing) return;
+    set({ isInitializing: true });
 
     const token = localStorage.getItem('token');
     const fingerprint = getFingerprint();
 
-    if (token) {
-      // 1. 如果本地有 Token，去后端换取最新的用户信息
-      try {
+    try {
+      if (token) {
         const response = await api.post('/auth/profile');
         if (response.data && response.data.user) {
-          set({ user: response.data.user, token, initialized: true });
+          set({ user: response.data.user, token, initialized: true, isInitializing: false });
           return;
         }
-      } catch (e) {
-        console.warn('Token expired or invalid, cleaning up...');
-        localStorage.removeItem('token');
       }
-    }
 
-    // 2. 如果本地没 Token，或者 Token 已失效，尝试 IP 自动登录
-    try {
+      // 尝试 IP+设备 自动登录
       const response = await api.post('/auth/auto-login', {}, {
         headers: { 'x-device-fingerprint': fingerprint }
       });
+      
       if (response.data && response.data.user) {
         const { user, access_token } = response.data;
         localStorage.setItem('token', access_token);
-        set({ user, token: access_token, initialized: true });
-      } else {
-        set({ initialized: true });
+        set({ user, token: access_token, initialized: true, isInitializing: false });
+        message.info(`自动登录: ${user.username}`);
       }
-    } catch (error) {
-      set({ initialized: true });
+    } catch (e) {
+      localStorage.removeItem('token');
+    } finally {
+      set({ initialized: true, isInitializing: false });
     }
   },
 }));

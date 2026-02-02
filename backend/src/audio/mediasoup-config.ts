@@ -4,7 +4,7 @@ export const config = {
   // Worker settings
   worker: {
     rtcMinPort: 10000,
-    rtcMaxPort: 10100,
+    rtcMaxPort: 10500, // 扩大端口范围
     logLevel: 'debug',
     logTags: [
       'info',
@@ -31,9 +31,12 @@ export const config = {
     listenIps: [
       {
         ip: '0.0.0.0',
-        announcedIp: '127.0.0.1', // Change to your public IP in production
+        announcedIp: '127.0.0.1', // 本地测试用 127.0.0.1
       },
     ],
+    enableUdp: true,
+    enableTcp: true, // <--- 关键：开启 TCP 支持
+    preferUdp: true, // 优先使用 UDP
     initialAvailableOutgoingBitrate: 1000000,
     minimumAvailableOutgoingBitrate: 600000,
     maxSctpMessageSize: 262144,

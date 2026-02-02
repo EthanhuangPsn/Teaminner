@@ -114,18 +114,17 @@ export class AuthService {
     }
 
     // 2. If no username or not found, try IP auto-login if no username was explicitly given
-    if (!user && ip && !dto.username) {
+    if (!user && ip && fingerprint && !dto.username) {
       const binding = await this.prisma.ipBinding.findUnique({
-        where: { ip },
+        where: { 
+          ip_deviceFingerprint: { ip, deviceFingerprint: fingerprint }
+        },
       });
 
       if (binding) {
-        // Simple security check: IP + Fingerprint (if fingerprint matches or is not provided)
-        if (!fingerprint || !binding.deviceFingerprint || binding.deviceFingerprint === fingerprint) {
-          user = await this.prisma.user.findUnique({
-            where: { id: binding.userId },
-          });
-        }
+        user = await this.prisma.user.findUnique({
+          where: { id: binding.userId },
+        });
       }
     }
 
@@ -159,16 +158,15 @@ export class AuthService {
   }
 
   async autoLoginByIp(ip: string, fingerprint?: string) {
+    if (!fingerprint) return null;
+
     const binding = await this.prisma.ipBinding.findUnique({
-      where: { ip },
+      where: { 
+        ip_deviceFingerprint: { ip, deviceFingerprint: fingerprint }
+      },
     });
 
     if (!binding) return null;
-
-    // Security check
-    if (fingerprint && binding.deviceFingerprint && binding.deviceFingerprint !== fingerprint) {
-      return null;
-    }
 
     const user = await this.prisma.user.findUnique({
       where: { id: binding.userId },
@@ -201,11 +199,14 @@ export class AuthService {
   }
 
   private async updateIpBinding(userId: string, ip: string, fingerprint?: string) {
+    if (!fingerprint) return;
+
     await this.prisma.ipBinding.upsert({
-      where: { ip },
+      where: { 
+        ip_deviceFingerprint: { ip, deviceFingerprint: fingerprint }
+      },
       update: {
         userId,
-        deviceFingerprint: fingerprint,
         lastActiveAt: new Date(),
       },
       create: {

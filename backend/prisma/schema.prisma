@@ -39,12 +39,15 @@ model User {
   updatedAt       DateTime @updatedAt
 }
 
-// Record the latest account for each IP
+// Record the latest account for each IP + Device combination
 model IpBinding {
-  ip                String   @id
+  id                String   @id @default(uuid())
+  ip                String
   userId            String
   deviceFingerprint String?
   lastActiveAt      DateTime @default(now())
+
+  @@unique([ip, deviceFingerprint])
 }
 
 model Room {
