@@ -11,6 +11,7 @@ export declare class AudioService implements OnModuleInit {
     private transports;
     private producers;
     private consumers;
+    private forceCallRooms;
     private readonly logger;
     constructor(roomsService: RoomsService, gatewayService: GatewayService);
     onModuleInit(): Promise<void>;
@@ -35,6 +36,7 @@ export declare class AudioService implements OnModuleInit {
     }>;
     resumeConsumer(userId: string, producerId: string): Promise<void>;
     pauseConsumer(userId: string, producerId: string): Promise<void>;
+    setForceCall(roomId: string, enabled: boolean): Promise<void>;
     updateRouting(roomId: string): Promise<void>;
     private checkCommunication;
 }

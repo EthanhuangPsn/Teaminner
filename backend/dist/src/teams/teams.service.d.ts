@@ -26,8 +26,48 @@ export declare class TeamsService {
         isOnline: boolean;
         roomId: string | null;
     }>;
+    assignUserToTeam(teamId: string, targetUserId: string, commanderId: string): Promise<{
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        username: string;
+        avatar: string | null;
+        micEnabled: boolean;
+        speakerEnabled: boolean;
+        isSpeaking: boolean;
+        password: string | null;
+        accountType: string;
+        accountRole: string;
+        roomRole: string | null;
+        lastIp: string | null;
+        deviceFingerprint: string | null;
+        lastActiveAt: Date;
+        teamId: string | null;
+        isOnline: boolean;
+        roomId: string | null;
+    }>;
+    unassignUser(targetUserId: string, commanderId: string): Promise<{
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        username: string;
+        avatar: string | null;
+        micEnabled: boolean;
+        speakerEnabled: boolean;
+        isSpeaking: boolean;
+        password: string | null;
+        accountType: string;
+        accountRole: string;
+        roomRole: string | null;
+        lastIp: string | null;
+        deviceFingerprint: string | null;
+        lastActiveAt: Date;
+        teamId: string | null;
+        isOnline: boolean;
+        roomId: string | null;
+    }>;
     leaveTeam(userId: string): Promise<void>;
-    setCaptain(teamId: string, userId: string): Promise<{
+    setCaptain(teamId: string, targetUserId: string, commanderId: string): Promise<{
         id: string;
         createdAt: Date;
         updatedAt: Date;

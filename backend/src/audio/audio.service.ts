@@ -12,6 +12,7 @@ export class AudioService implements OnModuleInit {
   private transports: Map<string, mediasoup.types.WebRtcTransport> = new Map(); // transportId -> Transport
   private producers: Map<string, mediasoup.types.Producer> = new Map(); // userId -> Producer
   private consumers: Map<string, Map<string, mediasoup.types.Consumer>> = new Map(); // userId -> (producerId -> Consumer)
+  private forceCallRooms: Set<string> = new Set(); // roomId -> isForceCall
 
   private readonly logger = new Logger(AudioService.name);
 
@@ -210,6 +211,16 @@ export class AudioService implements OnModuleInit {
     }
   }
 
+  async setForceCall(roomId: string, enabled: boolean) {
+    if (enabled) {
+      this.forceCallRooms.add(roomId);
+    } else {
+      this.forceCallRooms.delete(roomId);
+    }
+    this.logger.log(`Force call ${enabled ? 'enabled' : 'disabled'} for room ${roomId}`);
+    await this.updateRouting(roomId);
+  }
+
   async updateRouting(roomId: string) {
     const room = await this.roomsService.findOne(roomId);
     if (!room) return;
@@ -233,7 +244,7 @@ export class AudioService implements OnModuleInit {
         const consumer = userAConsumers.get(producerB.id);
         if (!consumer) continue;
 
-        const canCommunicate = this.checkCommunication(userA, userB, room.status);
+        const canCommunicate = this.checkCommunication(userA, userB, room);
         if (canCommunicate) {
           if (consumer.paused) {
             this.logger.log(`Resuming consumer for user ${userA.id} from producer of user ${userB.id} (routing update)`);
@@ -249,18 +260,27 @@ export class AudioService implements OnModuleInit {
     }
   }
 
-  private checkCommunication(userA: any, userB: any, roomStatus: string): boolean {
+  private checkCommunication(userA: any, userB: any, room: any): boolean {
+    // 强制呼叫模式：无视所有规则，所有人互通
+    if (this.forceCallRooms.has(userA.roomId)) return true;
+
+    const roomStatus = room.status;
+    const leaderId = room.leaderId;
+
     if (roomStatus === 'preparing') return true;
     
-    // 未分队用户在攻坚模式下无法通信
-    if (!userA.teamId && userA.roomRole !== 'leader') return false;
-    if (!userB.teamId && userB.roomRole !== 'leader') return false;
+    // 未分队用户在攻坚模式下无法通信 (除非是团长)
+    const isALeader = userA.id === leaderId;
+    const isBLeader = userB.id === leaderId;
+
+    if (!userA.teamId && !isALeader) return false;
+    if (!userB.teamId && !isBLeader) return false;
 
     // 攻坚模式规则 (双向通信)
     
     // 团长 <-> 所有队长
-    if (userA.roomRole === 'leader' && userB.roomRole === 'captain') return true;
-    if (userB.roomRole === 'leader' && userA.roomRole === 'captain') return true;
+    if (isALeader && userB.roomRole === 'captain') return true;
+    if (isBLeader && userA.roomRole === 'captain') return true;
     
     // 队长 <-> 队长
     if (userA.roomRole === 'captain' && userB.roomRole === 'captain') return true;
@@ -272,9 +292,9 @@ export class AudioService implements OnModuleInit {
     // 队员 <-> 队员 (同队)
     if (userA.teamId === userB.teamId && userA.teamId !== null) return true;
 
-    // 团长 <-> 同队队员 (如果团长兼任队长或加入小队)
-    if (userA.roomRole === 'leader' && userA.teamId && userB.teamId === userA.teamId) return true;
-    if (userB.roomRole === 'leader' && userB.teamId && userA.teamId === userB.teamId) return true;
+    // 团长 <-> 自己所在队的队员
+    if (isALeader && userA.teamId && userB.teamId === userA.teamId) return true;
+    if (isBLeader && userB.teamId && userA.teamId === userB.teamId) return true;
 
     return false;
   }

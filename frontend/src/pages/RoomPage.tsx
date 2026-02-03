@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Layout, Button, Space, List, Badge, Typography, message, Collapse, Avatar, Tag } from 'antd';
+import { Layout, Button, Space, List, Badge, Typography, message, Collapse, Avatar, Tag, Dropdown } from 'antd';
 import { useRoomStore } from '../store/roomStore';
 import { useAuthStore } from '../store/authStore';
-import { Mic, MicOff, Headphones, HeadphoneOff, ArrowLeft, Shield, User, Users } from 'lucide-react';
+import { Mic, MicOff, Headphones, HeadphoneOff, ArrowLeft, Shield, User, Users, Wifi, Activity, Radio } from 'lucide-react';
 import api from '../api/client';
 import { WebRTCManager } from '../utils/webrtc';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -26,6 +26,7 @@ const RoomPage: React.FC = () => {
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
   const [iceState, setIceState] = useState({ send: 'none', recv: 'none' });
   const [outputVolume, setOutputVolume] = useState(60);
+  const [isForceCalling, setIsForceCalling] = useState(false);
   
   const webrtcRef = useRef<WebRTCManager | null>(null);
   const initializingRef = useRef(false);
@@ -230,7 +231,7 @@ const RoomPage: React.FC = () => {
   useEffect(() => {
     if (currentRoom && user && !currentRoom.users.find(u => u.id === user.id)) {
       console.log('Detected user not in room, joining...');
-      useRoomStore.getState().joinRoom(currentRoom.id).catch(err => {
+      useRoomStore.getState().joinRoom(currentRoom.id).catch(() => {
         message.error('自动加入房间失败');
         navigate('/');
       });
@@ -241,7 +242,12 @@ const RoomPage: React.FC = () => {
   useEffect(() => {
     if (socket && id && user && !webrtcRef.current && !initializingRef.current) {
       initializingRef.current = true;
-      const manager = new WebRTCManager(socket, id, user.id);
+      const manager = new WebRTCManager(
+        socket, 
+        id, 
+        user.id,
+        (state) => setIceState(state)
+      );
       manager.init().then(success => {
         if (success) {
           webrtcRef.current = manager;
@@ -294,6 +300,39 @@ const RoomPage: React.FC = () => {
       message.success('已加入小队');
     } catch (error) {
       message.error('加入小队失败');
+    }
+  };
+
+  const handleAssignUser = async (userId: string, teamId: string) => {
+    if (!currentRoom) return;
+    try {
+      await api.post(`/teams/${teamId}/assign`, { userId });
+      fetchRoom(currentRoom.id);
+      message.success('指派成功');
+    } catch (error) {
+      message.error('指派失败');
+    }
+  };
+
+  const handleUnassignUser = async (userId: string) => {
+    if (!currentRoom) return;
+    try {
+      await api.post(`/teams/unassign`, { userId });
+      fetchRoom(currentRoom.id);
+      message.success('已移出小队');
+    } catch (error) {
+      message.error('移出小队失败');
+    }
+  };
+
+  const handleSetCaptain = async (teamId: string, userId: string) => {
+    if (!currentRoom) return;
+    try {
+      await api.post(`/teams/${teamId}/captain`, { userId });
+      fetchRoom(currentRoom.id);
+      message.success('已任命新队长');
+    } catch (error) {
+      message.error('任命队长失败');
     }
   };
 
@@ -537,6 +576,73 @@ const RoomPage: React.FC = () => {
 
   const unassignedUsers = currentRoom?.users?.filter(u => !u.teamId) || [];
 
+  const [draggingUserId, setDraggingUserId] = useState<string | null>(null);
+
+  const handleDragStart = (userId: string) => {
+    setDraggingUserId(userId);
+  };
+
+  const handleDropOnTeam = (teamId: string) => {
+    if (draggingUserId) {
+      handleAssignUser(draggingUserId, teamId);
+      setDraggingUserId(null);
+    }
+  };
+
+  const handleDropOnUnassigned = () => {
+    if (draggingUserId) {
+      handleUnassignUser(draggingUserId);
+      setDraggingUserId(null);
+    }
+  };
+
+  // 统一的指挥官操作
+  const handleLeaderMuteAll = () => {
+    if (!socket) return;
+    socket.emit('leader:mute-all', id);
+    message.warning('已下达全体禁音指令');
+  };
+
+  const handleLeaderForceCall = () => {
+    if (!socket) return;
+    const nextState = !isForceCalling;
+    socket.emit('leader:force-call', { roomId: id, enabled: nextState });
+    setIsForceCalling(nextState);
+    if (nextState) {
+      message.success('全体强制呼叫已开启 (无视路由规则)');
+    } else {
+      message.info('全体强制呼叫已关闭');
+    }
+  };
+
+  // 监听指挥官指令
+  useEffect(() => {
+    if (!socket) return;
+
+    const onForceMute = () => {
+      // 如果自己不是团长，则强制关麦
+      const isLeader = currentRoom?.leaderId === user?.id;
+      if (!isLeader && micOn) {
+        // 模拟点击关麦
+        const micBtn = document.getElementById('mic-toggle-btn');
+        if (micBtn) micBtn.click();
+        message.error('指挥官已下达全体禁音指令');
+      }
+    };
+
+    const onForceCallStatus = ({ enabled }: { enabled: boolean }) => {
+      setIsForceCalling(enabled);
+    };
+
+    socket.on('force-mute-all', onForceMute);
+    socket.on('force-call-status', onForceCallStatus);
+
+    return () => {
+      socket.off('force-mute-all', onForceMute);
+      socket.off('force-call-status', onForceCallStatus);
+    };
+  }, [socket, currentRoom, user, micOn]);
+
   if (!currentRoom || !user) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
@@ -560,7 +666,11 @@ const RoomPage: React.FC = () => {
           {currentRoom.teams.map((team) => (
             <Panel 
               header={
-                <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', paddingRight: '24px' }}>
+                <div 
+                  onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                  onDrop={() => handleDropOnTeam(team.id)}
+                  style={{ display: 'flex', justifyContent: 'space-between', width: '100%', paddingRight: '24px' }}
+                >
                   <Space>
                     <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: team.teamColor }} />
                     <span style={{ fontWeight: 'bold' }}>{team.teamColor === 'red' ? '红队' : team.teamColor === 'green' ? '绿队' : team.teamColor === 'yellow' ? '黄队' : team.teamColor}</span>
@@ -578,34 +688,72 @@ const RoomPage: React.FC = () => {
               } 
               key={team.id}
             >
-              <List
-                itemLayout="horizontal"
-                dataSource={team.members}
-                renderItem={(m: any) => (
-                  <List.Item style={{ padding: '8px 4px' }}>
-                    <List.Item.Meta
-                      avatar={
-                        <Badge dot={m.id === user.id ? localSpeaking : speakingUsers.has(m.id)} color="green" offset={[-2, 28]}>
-                          <Avatar size="small" src={m.avatar} icon={<User size={12} />} />
-                        </Badge>
-                      }
-                      title={
-                        <Space size={4}>
-                          <span style={{ fontSize: '14px' }}>{m.username}</span>
-                          {team.captainId === m.id && <Shield size={12} color="#1890ff" />}
-                          {currentRoom.leaderId === m.id && <Tag color="gold" style={{ margin: 0, padding: '0 4px', fontSize: '10px' }}>团长</Tag>}
-                        </Space>
-                      }
-                      description={
-                        <Space size={8}>
-                          {m.micEnabled ? <Mic size={12} color="green" /> : <MicOff size={12} color="#bfbfbf" />}
-                          {m.speakerEnabled ? <Headphones size={12} color="green" /> : <HeadphoneOff size={12} color="#bfbfbf" />}
-                        </Space>
-                      }
-                    />
-                  </List.Item>
-                )}
-              />
+              <div 
+                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                onDrop={() => handleDropOnTeam(team.id)}
+                style={{ minHeight: '40px' }}
+              >
+                <List
+                  itemLayout="horizontal"
+                  dataSource={team.members}
+                  renderItem={(m: any) => (
+                    <Dropdown
+                    menu={{
+                      items: [
+                        {
+                          key: 'set-captain',
+                          label: '任命为队长',
+                          disabled: m.roomRole === 'captain',
+                          onClick: () => handleSetCaptain(m.teamId, m.id),
+                        },
+                        { type: 'divider' },
+                        {
+                          key: 'unassign',
+                          label: '从队中移出',
+                          onClick: () => handleUnassignUser(m.id),
+                          danger: true,
+                        },
+                        { type: 'divider' },
+                        ...currentRoom.teams.map(t => ({
+                          key: t.id,
+                          label: `移动到: ${t.teamColor === 'red' ? '红队' : t.teamColor === 'green' ? '绿队' : t.teamColor === 'yellow' ? '黄队' : t.teamColor}`,
+                          disabled: t.id === m.teamId,
+                          onClick: () => handleAssignUser(m.id, t.id)
+                        }))
+                      ]
+                    }}
+                      trigger={isLeader ? ['contextMenu'] : []}
+                    >
+                      <List.Item 
+                        style={{ padding: '8px 4px', cursor: isLeader ? 'grab' : 'default' }}
+                        draggable={isLeader}
+                        onDragStart={() => handleDragStart(m.id)}
+                      >
+                        <List.Item.Meta
+                        avatar={
+                          <Badge dot={m.id === user.id ? localSpeaking : speakingUsers.has(m.id)} color="green" offset={[-2, 28]}>
+                            <Avatar size="small" src={m.avatar} icon={<User size={12} />} />
+                          </Badge>
+                        }
+                          title={
+                            <Space size={4}>
+                              <span style={{ fontSize: '14px' }}>{m.username}</span>
+                              {m.roomRole === 'captain' && <Tag color="blue" style={{ margin: 0, padding: '0 4px', fontSize: '10px' }}>队长</Tag>}
+                              {currentRoom.leaderId === m.id && <Tag color="gold" style={{ margin: 0, padding: '0 4px', fontSize: '10px' }}>团长</Tag>}
+                            </Space>
+                          }
+                          description={
+                            <Space size={8}>
+                              {m.micEnabled ? <Mic size={12} color="green" /> : <MicOff size={12} color="#bfbfbf" />}
+                              {m.speakerEnabled ? <Headphones size={12} color="green" /> : <HeadphoneOff size={12} color="#bfbfbf" />}
+                            </Space>
+                          }
+                        />
+                      </List.Item>
+                    </Dropdown>
+                  )}
+                />
+              </div>
             </Panel>
           ))}
 
@@ -615,33 +763,54 @@ const RoomPage: React.FC = () => {
               header={<Space><Users size={16} /><span>未分队 ({unassignedUsers.length})</span></Space>} 
               key="unassigned"
             >
-              <List
-                itemLayout="horizontal"
-                dataSource={unassignedUsers}
-                renderItem={(u) => (
-                  <List.Item style={{ padding: '8px 4px' }}>
-                    <List.Item.Meta
-                      avatar={
-                        <Badge dot={u.id === user.id ? localSpeaking : speakingUsers.has(u.id)} color="green" offset={[-2, 28]}>
-                          <Avatar size="small" src={u.avatar} icon={<User size={12} />} />
-                        </Badge>
-                      }
-                      title={
-                        <Space size={4}>
-                          <span style={{ fontSize: '14px' }}>{u.username}</span>
-                          {currentRoom.leaderId === u.id && <Tag color="gold" style={{ margin: 0, padding: '0 4px', fontSize: '10px' }}>团长</Tag>}
-                        </Space>
-                      }
-                      description={
-                        <Space size={8}>
-                          {u.micEnabled ? <Mic size={12} color="green" /> : <MicOff size={12} color="#bfbfbf" />}
-                          {u.speakerEnabled ? <Headphones size={12} color="green" /> : <HeadphoneOff size={12} color="#bfbfbf" />}
-                        </Space>
-                      }
-                    />
-                  </List.Item>
-                )}
-              />
+              <div 
+                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                onDrop={() => handleDropOnUnassigned()}
+                style={{ minHeight: '40px' }}
+              >
+                <List
+                  itemLayout="horizontal"
+                  dataSource={unassignedUsers}
+                  renderItem={(u) => (
+                    <Dropdown
+                      menu={{
+                        items: currentRoom.teams.map(t => ({
+                          key: t.id,
+                          label: `指派到: ${t.teamColor === 'red' ? '红队' : t.teamColor === 'green' ? '绿队' : t.teamColor === 'yellow' ? '黄队' : t.teamColor}`,
+                          onClick: () => handleAssignUser(u.id, t.id)
+                        }))
+                      }}
+                      trigger={isLeader ? ['contextMenu'] : []}
+                    >
+                      <List.Item 
+                        style={{ padding: '8px 4px', cursor: isLeader ? 'grab' : 'default' }}
+                        draggable={isLeader}
+                        onDragStart={() => handleDragStart(u.id)}
+                      >
+                        <List.Item.Meta
+                          avatar={
+                            <Badge dot={u.id === user.id ? localSpeaking : speakingUsers.has(u.id)} color="green" offset={[-2, 28]}>
+                              <Avatar size="small" src={u.avatar} icon={<User size={12} />} />
+                            </Badge>
+                          }
+                          title={
+                            <Space size={4}>
+                              <span style={{ fontSize: '14px' }}>{u.username}</span>
+                              {currentRoom.leaderId === u.id && <Tag color="gold" style={{ margin: 0, padding: '0 4px', fontSize: '10px' }}>团长</Tag>}
+                            </Space>
+                          }
+                          description={
+                            <Space size={8}>
+                              {u.micEnabled ? <Mic size={12} color="green" /> : <MicOff size={12} color="#bfbfbf" />}
+                              {u.speakerEnabled ? <Headphones size={12} color="green" /> : <HeadphoneOff size={12} color="#bfbfbf" />}
+                            </Space>
+                          }
+                        />
+                      </List.Item>
+                    </Dropdown>
+                  )}
+                />
+              </div>
             </Panel>
           )}
         </Collapse>
@@ -649,23 +818,67 @@ const RoomPage: React.FC = () => {
       
       <Content style={{ padding: '24px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-          <div>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
             <Title level={3} style={{ margin: 0 }}>{currentRoom.roomName}</Title>
-            <Space>
-              <Text type="secondary">状态: </Text>
-              <Tag color={currentRoom.status === 'preparing' ? 'green' : 'red'}>
-                {currentRoom.status === 'preparing' ? '备战中' : '攻坚中'}
-              </Tag>
+            <Space split={<Text type="secondary" style={{ fontSize: '12px' }}>|</Text>}>
+              <Space size={4}>
+                <Text type="secondary" style={{ fontSize: '12px' }}>状态: </Text>
+                <Tag color={currentRoom.status === 'preparing' ? 'green' : 'red'} style={{ margin: 0 }}>
+                  {currentRoom.status === 'preparing' ? '备战中' : '攻坚中'}
+                </Tag>
+              </Space>
+              
+              <Space size={4}>
+                <Wifi size={12} color={iceState.send === 'connected' ? '#52c41a' : '#faad14'} />
+                <Text type="secondary" style={{ fontSize: '10px' }}>
+                  上行: {iceState.send.toUpperCase()}
+                </Text>
+              </Space>
+              
+              <Space size={4}>
+                <Activity size={12} color={iceState.recv === 'connected' ? '#52c41a' : '#faad14'} />
+                <Text type="secondary" style={{ fontSize: '10px' }}>
+                  下行: {iceState.recv.toUpperCase()}
+                </Text>
+              </Space>
             </Space>
           </div>
           
           <Space>
             {isLeader && (
-              <Button type="primary" onClick={handleToggleStatus}>
-                切换为{currentRoom.status === 'preparing' ? '攻坚' : '备战'}状态
-              </Button>
+              <Space style={{ background: '#fff1f0', padding: '4px 12px', borderRadius: '6px', border: '1px solid #ffa39e' }}>
+                <Text strong style={{ color: '#cf1322', marginRight: '8px', fontSize: '12px' }}>
+                  <Shield size={14} style={{ verticalAlign: 'middle', marginRight: '4px' }} />
+                  指挥权
+                </Text>
+                <Button 
+                  size="small"
+                  type={currentRoom.status === 'preparing' ? 'primary' : 'default'}
+                  danger={currentRoom.status === 'preparing'}
+                  onClick={handleToggleStatus}
+                >
+                  {currentRoom.status === 'preparing' ? '开启攻坚模式' : '切回备战模式'}
+                </Button>
+                <Button 
+                  size="small"
+                  icon={<MicOff size={14} />} 
+                  onClick={handleLeaderMuteAll}
+                >
+                  全体静音
+                </Button>
+                <Button 
+                  size="small"
+                  type={isForceCalling ? 'primary' : 'default'}
+                  danger={isForceCalling}
+                  icon={<Radio size={14} />} 
+                  onClick={handleLeaderForceCall}
+                >
+                  {isForceCalling ? '停止强呼' : '全体强呼'}
+                </Button>
+              </Space>
             )}
             <Button 
+              id="mic-toggle-btn"
               icon={micOn ? <Mic size={16} /> : <MicOff size={16} />} 
               onClick={handleMicToggle}
               type={micOn ? 'primary' : 'default'}

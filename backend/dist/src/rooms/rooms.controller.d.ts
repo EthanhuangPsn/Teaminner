@@ -163,23 +163,6 @@ export declare class RoomsController {
         updatedAt: Date;
     }>;
     transferLeader(id: string, targetUserId: string): Promise<{
-        id: string;
-        createdAt: Date;
-        updatedAt: Date;
-        username: string;
-        avatar: string | null;
-        micEnabled: boolean;
-        speakerEnabled: boolean;
-        isSpeaking: boolean;
-        password: string | null;
-        accountType: string;
-        accountRole: string;
-        roomRole: string | null;
-        lastIp: string | null;
-        deviceFingerprint: string | null;
-        lastActiveAt: Date;
-        teamId: string | null;
-        isOnline: boolean;
-        roomId: string | null;
+        success: boolean;
     }>;
 }

@@ -29,7 +29,7 @@ export class TeamsService {
     }
 
     const isFirstMember = team.members.length === 0;
-    const newRole = (isFirstMember && user.roomRole === 'member') ? 'captain' : user.roomRole;
+    const newRole = isFirstMember ? 'captain' : 'member';
 
     const updatedUser = await this.prisma.user.update({
       where: { id: userId },
@@ -43,18 +43,102 @@ export class TeamsService {
     return updatedUser;
   }
 
+  async assignUserToTeam(teamId: string, targetUserId: string, commanderId: string) {
+    const team = await this.prisma.team.findUnique({
+      where: { id: teamId },
+      include: { 
+        room: true,
+        members: true
+      },
+    });
+
+    if (!team || !team.room) throw new NotFoundException('Team or Room not found');
+    
+    // 权限校验：只有房间团长有权指派
+    if (team.room.leaderId !== commanderId) {
+      throw new BadRequestException('只有指挥官有权指派队员');
+    }
+
+    if (!team.isEnabled) throw new BadRequestException('该小队当前未启用');
+    if (team.members.length >= 5) throw new BadRequestException('该小队人数已满');
+
+    const targetUser = await this.prisma.user.findUnique({ where: { id: targetUserId } });
+    if (!targetUser || targetUser.roomId !== team.roomId) {
+      throw new BadRequestException('目标用户不在当前房间');
+    }
+
+    // 执行加入逻辑
+    const isFirstMember = team.members.length === 0;
+    const newRole = isFirstMember ? 'captain' : 'member';
+
+    const updatedUser = await this.prisma.user.update({
+      where: { id: targetUserId },
+      data: {
+        teamId,
+        roomRole: newRole,
+      },
+    });
+
+    await this.notifyRoomUpdate(team.roomId);
+    return updatedUser;
+  }
+
+  async unassignUser(targetUserId: string, commanderId: string) {
+    const targetUser = await this.prisma.user.findUnique({
+      where: { id: targetUserId },
+      include: { room: true }
+    });
+
+    if (!targetUser || !targetUser.roomId || !targetUser.room) throw new NotFoundException('User or Room not found');
+    
+    // 权限校验
+    if (targetUser.room.leaderId !== commanderId) {
+      throw new BadRequestException('只有指挥官有权解除分队');
+    }
+
+    const oldTeamId = targetUser.teamId;
+
+    const updatedUser = await this.prisma.user.update({
+      where: { id: targetUserId },
+      data: {
+        teamId: null,
+        roomRole: 'member', // 离开小队后，战术角色统一回归为普通成员
+      },
+    });
+
+    // 如果之前是队长，尝试指派新队长
+    if (targetUser.roomRole === 'captain' && oldTeamId) {
+      const nextMember = await this.prisma.user.findFirst({
+        where: { teamId: oldTeamId, roomRole: 'member' },
+      });
+      if (nextMember) {
+        await this.prisma.user.update({
+          where: { id: nextMember.id },
+          data: { roomRole: 'captain' },
+        });
+      }
+    }
+
+    await this.notifyRoomUpdate(targetUser.roomId);
+    return updatedUser;
+  }
+
   async leaveTeam(userId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user || !user.teamId) return;
 
     const teamId = user.teamId;
     const roomId = user.roomId;
+    
+    // Check if they are the leader of the room
+    const room = roomId ? await this.prisma.room.findUnique({ where: { id: roomId } }) : null;
+    const isLeader = room?.leaderId === userId;
 
     await this.prisma.user.update({
       where: { id: userId },
       data: {
         teamId: null,
-        roomRole: user.roomRole === 'captain' ? 'member' : user.roomRole,
+        roomRole: 'member', // 离开小队后回归普通成员角色
       },
     });
 
@@ -73,27 +157,37 @@ export class TeamsService {
     if (roomId) await this.notifyRoomUpdate(roomId);
   }
 
-  async setCaptain(teamId: string, userId: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user || user.teamId !== teamId) {
-      throw new BadRequestException('User is not in the team');
+  async setCaptain(teamId: string, targetUserId: string, commanderId: string) {
+    const team = await this.prisma.team.findUnique({
+      where: { id: teamId },
+      include: { room: true }
+    });
+
+    if (!team || !team.room) throw new NotFoundException('Team or Room not found');
+    
+    // 权限校验：只有房间团长有权任命队长
+    if (team.room.leaderId !== commanderId) {
+      throw new BadRequestException('只有指挥官有权任命队长');
     }
 
-    if (user.roomRole === 'leader') {
-        return user;
+    const targetUser = await this.prisma.user.findUnique({ where: { id: targetUserId } });
+    if (!targetUser || targetUser.teamId !== teamId) {
+      throw new BadRequestException('目标用户不在该小队中');
     }
 
+    // 1. 将该队原队长降级为普通成员
     await this.prisma.user.updateMany({
       where: { teamId, roomRole: 'captain' },
       data: { roomRole: 'member' },
     });
 
+    // 2. 提升目标用户为队长
     const updatedUser = await this.prisma.user.update({
-      where: { id: userId },
+      where: { id: targetUserId },
       data: { roomRole: 'captain' },
     });
 
-    if (user.roomId) await this.notifyRoomUpdate(user.roomId);
+    await this.notifyRoomUpdate(team.roomId);
     return updatedUser;
   }
 

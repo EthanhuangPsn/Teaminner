@@ -67,6 +67,21 @@ let RoomsService = class RoomsService {
         }
         return room;
     }
+    async muteAllUsers(roomId) {
+        const room = await this.findOne(roomId);
+        if (!room)
+            return;
+        await this.prisma.user.updateMany({
+            where: {
+                roomId,
+                ...(room.leaderId ? { NOT: { id: room.leaderId } } : {})
+            },
+            data: { micEnabled: false }
+        });
+        const updatedRoom = await this.findOne(roomId);
+        this.gatewayService.broadcastRoomUpdate(roomId, updatedRoom);
+        await this.audioService.updateRouting(roomId);
+    }
     async clearAllUserStatuses() {
         await this.prisma.user.updateMany({
             data: {
@@ -114,17 +129,11 @@ let RoomsService = class RoomsService {
                 where: { id: roomId },
                 data: { leaderId: userId },
             });
-            await this.prisma.user.update({
-                where: { id: userId },
-                data: { roomRole: 'leader' },
-            });
         }
-        else {
-            await this.prisma.user.update({
-                where: { id: userId },
-                data: { roomRole: 'member' },
-            });
-        }
+        await this.prisma.user.update({
+            where: { id: userId },
+            data: { roomRole: 'member' },
+        });
         const updatedRoom = await this.findOne(roomId);
         this.gatewayService.broadcastRoomUpdate(roomId, updatedRoom);
         await this.audioService.updateRouting(roomId);
@@ -184,24 +193,14 @@ let RoomsService = class RoomsService {
         if (!targetUser || targetUser.roomId !== roomId) {
             throw new common_1.BadRequestException('Target user is not in the room');
         }
-        if (room.leaderId) {
-            await this.prisma.user.update({
-                where: { id: room.leaderId },
-                data: { roomRole: 'member' }
-            });
-        }
         await this.prisma.room.update({
             where: { id: roomId },
             data: { leaderId: targetUserId },
         });
-        const updatedUser = await this.prisma.user.update({
-            where: { id: targetUserId },
-            data: { roomRole: 'leader' },
-        });
         const updatedRoom = await this.findOne(roomId);
         this.gatewayService.broadcastRoomUpdate(roomId, updatedRoom);
         await this.audioService.updateRouting(roomId);
-        return updatedUser;
+        return { success: true };
     }
 };
 exports.RoomsService = RoomsService;

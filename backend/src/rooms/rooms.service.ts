@@ -62,6 +62,24 @@ export class RoomsService {
     return room;
   }
 
+  async muteAllUsers(roomId: string) {
+    // 1. 在数据库中重置所有用户的麦克风状态（除了团长）
+    const room = await this.findOne(roomId);
+    if (!room) return;
+
+    await this.prisma.user.updateMany({
+      where: { 
+        roomId,
+        ...(room.leaderId ? { NOT: { id: room.leaderId } } : {})
+      },
+      data: { micEnabled: false }
+    });
+
+    const updatedRoom = await this.findOne(roomId);
+    this.gatewayService.broadcastRoomUpdate(roomId, updatedRoom);
+    await this.audioService.updateRouting(roomId);
+  }
+
   async clearAllUserStatuses() {
     // 重置所有用户的房间、角色和麦克风状态
     await this.prisma.user.updateMany({
@@ -119,16 +137,14 @@ export class RoomsService {
         where: { id: roomId },
         data: { leaderId: userId },
       });
-      await this.prisma.user.update({
-        where: { id: userId },
-        data: { roomRole: 'leader' },
-      });
-    } else {
-      await this.prisma.user.update({
-        where: { id: userId },
-        data: { roomRole: 'member' },
-      });
     }
+    
+    // 所有人加入房间时，战术角色默认为 member
+    // 团长身份由 room.leaderId 独立标识
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { roomRole: 'member' },
+    });
 
     const updatedRoom = await this.findOne(roomId);
     this.gatewayService.broadcastRoomUpdate(roomId, updatedRoom);
@@ -203,30 +219,16 @@ export class RoomsService {
       throw new BadRequestException('Target user is not in the room');
     }
 
-    // Demote old leader
-    if (room.leaderId) {
-        await this.prisma.user.update({
-            where: { id: room.leaderId },
-            data: { roomRole: 'member' } // Simplify for now
-        });
-    }
-
     // Update room leader
     await this.prisma.room.update({
       where: { id: roomId },
       data: { leaderId: targetUserId },
     });
 
-    // Promote new leader
-    const updatedUser = await this.prisma.user.update({
-      where: { id: targetUserId },
-      data: { roomRole: 'leader' },
-    });
-
     const updatedRoom = await this.findOne(roomId);
     this.gatewayService.broadcastRoomUpdate(roomId, updatedRoom);
     await this.audioService.updateRouting(roomId);
 
-    return updatedUser;
+    return { success: true };
   }
 }

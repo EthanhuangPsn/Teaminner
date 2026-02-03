@@ -13,6 +13,18 @@ export class TeamsController {
     return this.teamsService.joinTeam(id, user.userId);
   }
 
+  @Post(':id/assign')
+  @UseGuards(JwtAuthGuard)
+  assignTeam(@Param('id') id: string, @Body('userId') targetUserId: string, @GetUser() commander: any) {
+    return this.teamsService.assignUserToTeam(id, targetUserId, commander.userId);
+  }
+
+  @Post('unassign')
+  @UseGuards(JwtAuthGuard)
+  unassign(@Body('userId') targetUserId: string, @GetUser() commander: any) {
+    return this.teamsService.unassignUser(targetUserId, commander.userId);
+  }
+
   @Delete('leave')
   @UseGuards(JwtAuthGuard)
   leaveTeam(@GetUser() user: any) {
@@ -21,8 +33,8 @@ export class TeamsController {
 
   @Post(':id/captain')
   @UseGuards(JwtAuthGuard)
-  setCaptain(@Param('id') id: string, @Body('userId') userId: string) {
-    return this.teamsService.setCaptain(id, userId);
+  setCaptain(@Param('id') id: string, @Body('userId') userId: string, @GetUser() commander: any) {
+    return this.teamsService.setCaptain(id, userId, commander.userId);
   }
 
   @Patch(':id/enable')

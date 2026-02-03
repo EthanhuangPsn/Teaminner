@@ -7,9 +7,10 @@ import {
   OnGatewayInit,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Logger } from '@nestjs/common';
+import { Logger, Inject, forwardRef } from '@nestjs/common';
 import { GatewayService } from './gateway.service';
 import { AudioService } from '../audio/audio.service';
+import { RoomsService } from '../rooms/rooms.service';
 
 @WebSocketGateway({
   cors: {
@@ -25,6 +26,8 @@ export class AppGateway implements OnGatewayInit, OnGatewayConnection, OnGateway
   constructor(
     private gatewayService: GatewayService,
     private audioService: AudioService,
+    @Inject(forwardRef(() => RoomsService))
+    private roomsService: RoomsService,
   ) {}
 
   afterInit(server: Server) {
@@ -84,6 +87,22 @@ export class AppGateway implements OnGatewayInit, OnGatewayConnection, OnGateway
   @SubscribeMessage('resumeConsumer')
   async handleResumeConsumer(client: Socket, data: { userId: string, producerId: string }) {
     await this.audioService.resumeConsumer(data.userId, data.producerId);
+    return { success: true };
+  }
+
+  // Commander Management
+  @SubscribeMessage('leader:force-call')
+  async handleForceCall(client: Socket, data: { roomId: string, enabled: boolean }) {
+    await this.audioService.setForceCall(data.roomId, data.enabled);
+    this.server.to(data.roomId).emit('force-call-status', { enabled: data.enabled });
+    return { success: true };
+  }
+
+  @SubscribeMessage('leader:mute-all')
+  async handleMuteAll(client: Socket, roomId: string) {
+    await this.roomsService.muteAllUsers(roomId);
+    this.server.to(roomId).emit('force-mute-all');
+    this.logger.log(`Leader in room ${roomId} executed Mute All`);
     return { success: true };
   }
 }

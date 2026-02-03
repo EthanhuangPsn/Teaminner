@@ -22,8 +22,48 @@ export declare class TeamsController {
         isOnline: boolean;
         roomId: string | null;
     }>;
+    assignTeam(id: string, targetUserId: string, commander: any): Promise<{
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        username: string;
+        avatar: string | null;
+        micEnabled: boolean;
+        speakerEnabled: boolean;
+        isSpeaking: boolean;
+        password: string | null;
+        accountType: string;
+        accountRole: string;
+        roomRole: string | null;
+        lastIp: string | null;
+        deviceFingerprint: string | null;
+        lastActiveAt: Date;
+        teamId: string | null;
+        isOnline: boolean;
+        roomId: string | null;
+    }>;
+    unassign(targetUserId: string, commander: any): Promise<{
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        username: string;
+        avatar: string | null;
+        micEnabled: boolean;
+        speakerEnabled: boolean;
+        isSpeaking: boolean;
+        password: string | null;
+        accountType: string;
+        accountRole: string;
+        roomRole: string | null;
+        lastIp: string | null;
+        deviceFingerprint: string | null;
+        lastActiveAt: Date;
+        teamId: string | null;
+        isOnline: boolean;
+        roomId: string | null;
+    }>;
     leaveTeam(user: any): Promise<void>;
-    setCaptain(id: string, userId: string): Promise<{
+    setCaptain(id: string, userId: string, commander: any): Promise<{
         id: string;
         createdAt: Date;
         updatedAt: Date;

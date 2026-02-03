@@ -61,6 +61,7 @@ let AudioService = AudioService_1 = class AudioService {
     transports = new Map();
     producers = new Map();
     consumers = new Map();
+    forceCallRooms = new Set();
     logger = new common_1.Logger(AudioService_1.name);
     constructor(roomsService, gatewayService) {
         this.roomsService = roomsService;
@@ -221,6 +222,16 @@ let AudioService = AudioService_1 = class AudioService {
             await consumer.pause();
         }
     }
+    async setForceCall(roomId, enabled) {
+        if (enabled) {
+            this.forceCallRooms.add(roomId);
+        }
+        else {
+            this.forceCallRooms.delete(roomId);
+        }
+        this.logger.log(`Force call ${enabled ? 'enabled' : 'disabled'} for room ${roomId}`);
+        await this.updateRouting(roomId);
+    }
     async updateRouting(roomId) {
         const room = await this.roomsService.findOne(roomId);
         if (!room)
@@ -242,7 +253,7 @@ let AudioService = AudioService_1 = class AudioService {
                 const consumer = userAConsumers.get(producerB.id);
                 if (!consumer)
                     continue;
-                const canCommunicate = this.checkCommunication(userA, userB, room.status);
+                const canCommunicate = this.checkCommunication(userA, userB, room);
                 if (canCommunicate) {
                     if (consumer.paused) {
                         this.logger.log(`Resuming consumer for user ${userA.id} from producer of user ${userB.id} (routing update)`);
@@ -258,16 +269,22 @@ let AudioService = AudioService_1 = class AudioService {
             }
         }
     }
-    checkCommunication(userA, userB, roomStatus) {
+    checkCommunication(userA, userB, room) {
+        if (this.forceCallRooms.has(userA.roomId))
+            return true;
+        const roomStatus = room.status;
+        const leaderId = room.leaderId;
         if (roomStatus === 'preparing')
             return true;
-        if (!userA.teamId && userA.roomRole !== 'leader')
+        const isALeader = userA.id === leaderId;
+        const isBLeader = userB.id === leaderId;
+        if (!userA.teamId && !isALeader)
             return false;
-        if (!userB.teamId && userB.roomRole !== 'leader')
+        if (!userB.teamId && !isBLeader)
             return false;
-        if (userA.roomRole === 'leader' && userB.roomRole === 'captain')
+        if (isALeader && userB.roomRole === 'captain')
             return true;
-        if (userB.roomRole === 'leader' && userA.roomRole === 'captain')
+        if (isBLeader && userA.roomRole === 'captain')
             return true;
         if (userA.roomRole === 'captain' && userB.roomRole === 'captain')
             return true;
@@ -277,9 +294,9 @@ let AudioService = AudioService_1 = class AudioService {
             return true;
         if (userA.teamId === userB.teamId && userA.teamId !== null)
             return true;
-        if (userA.roomRole === 'leader' && userA.teamId && userB.teamId === userA.teamId)
+        if (isALeader && userA.teamId && userB.teamId === userA.teamId)
             return true;
-        if (userB.roomRole === 'leader' && userB.teamId && userA.teamId === userB.teamId)
+        if (isBLeader && userB.teamId && userA.teamId === userB.teamId)
             return true;
         return false;
     }

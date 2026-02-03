@@ -92,6 +92,7 @@ export declare class RoomsService {
         createdAt: Date;
         updatedAt: Date;
     }>;
+    muteAllUsers(roomId: string): Promise<void>;
     clearAllUserStatuses(): Promise<void>;
     joinRoom(roomId: string, userId: string): Promise<{
         users: {
@@ -168,23 +169,6 @@ export declare class RoomsService {
         updatedAt: Date;
     }>;
     transferLeader(roomId: string, targetUserId: string): Promise<{
-        id: string;
-        createdAt: Date;
-        updatedAt: Date;
-        username: string;
-        avatar: string | null;
-        micEnabled: boolean;
-        speakerEnabled: boolean;
-        isSpeaking: boolean;
-        password: string | null;
-        accountType: string;
-        accountRole: string;
-        roomRole: string | null;
-        lastIp: string | null;
-        deviceFingerprint: string | null;
-        lastActiveAt: Date;
-        teamId: string | null;
-        isOnline: boolean;
-        roomId: string | null;
+        success: boolean;
     }>;
 }

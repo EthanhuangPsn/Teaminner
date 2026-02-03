@@ -25,11 +25,17 @@ let TeamsController = class TeamsController {
     joinTeam(id, user) {
         return this.teamsService.joinTeam(id, user.userId);
     }
+    assignTeam(id, targetUserId, commander) {
+        return this.teamsService.assignUserToTeam(id, targetUserId, commander.userId);
+    }
+    unassign(targetUserId, commander) {
+        return this.teamsService.unassignUser(targetUserId, commander.userId);
+    }
     leaveTeam(user) {
         return this.teamsService.leaveTeam(user.userId);
     }
-    setCaptain(id, userId) {
-        return this.teamsService.setCaptain(id, userId);
+    setCaptain(id, userId, commander) {
+        return this.teamsService.setCaptain(id, userId, commander.userId);
     }
     enableTeam(id, enabled) {
         return this.teamsService.enableTeam(id, enabled);
@@ -46,6 +52,25 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], TeamsController.prototype, "joinTeam", null);
 __decorate([
+    (0, common_1.Post)(':id/assign'),
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, common_1.Body)('userId')),
+    __param(2, (0, get_user_decorator_1.GetUser)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String, Object]),
+    __metadata("design:returntype", void 0)
+], TeamsController.prototype, "assignTeam", null);
+__decorate([
+    (0, common_1.Post)('unassign'),
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    __param(0, (0, common_1.Body)('userId')),
+    __param(1, (0, get_user_decorator_1.GetUser)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:returntype", void 0)
+], TeamsController.prototype, "unassign", null);
+__decorate([
     (0, common_1.Delete)('leave'),
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     __param(0, (0, get_user_decorator_1.GetUser)()),
@@ -58,8 +83,9 @@ __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     __param(0, (0, common_1.Param)('id')),
     __param(1, (0, common_1.Body)('userId')),
+    __param(2, (0, get_user_decorator_1.GetUser)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, String]),
+    __metadata("design:paramtypes", [String, String, Object]),
     __metadata("design:returntype", void 0)
 ], TeamsController.prototype, "setCaptain", null);
 __decorate([
