@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Layout, Row, Col, Card, Avatar, Tag, Button, Space, List, Badge, Typography, message, Collapse } from 'antd';
+import { Layout, Button, Space, List, Badge, Typography, message, Collapse, Avatar, Tag } from 'antd';
 import { useRoomStore } from '../store/roomStore';
 import { useAuthStore } from '../store/authStore';
-import { Mic, MicOff, Headphones, HeadphoneOff, ArrowLeft, Shield, User, Star, Users } from 'lucide-react';
+import { Mic, MicOff, Headphones, HeadphoneOff, ArrowLeft, Shield, User, Users } from 'lucide-react';
 import api from '../api/client';
 import { WebRTCManager } from '../utils/webrtc';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -25,29 +25,27 @@ const RoomPage: React.FC = () => {
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
   const [iceState, setIceState] = useState({ send: 'none', recv: 'none' });
+  const [outputVolume, setOutputVolume] = useState(60);
   
   const webrtcRef = useRef<WebRTCManager | null>(null);
   const initializingRef = useRef(false);
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
+  const audioNodesRef = useRef<Map<string, { 
+    source: MediaStreamAudioSourceNode, 
+    panner: StereoPannerNode,
+    clarity?: BiquadFilterNode,
+    lowCut?: BiquadFilterNode
+  }>>(new Map());
   const audioContainerRef = useRef<HTMLDivElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const masterCompressorRef = useRef<DynamicsCompressorNode | null>(null);
+  const masterGainRef = useRef<GainNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-
-  // 定期更新 ICE 状态
-  useEffect(() => {
-    const timer = setInterval(() => {
-      if (webrtcRef.current) {
-        setIceState(webrtcRef.current.getIceState());
-      }
-    }, 2000);
-    return () => clearInterval(timer);
-  }, []);
 
   // 获取设备列表
   useEffect(() => {
     const getDevices = async () => {
       try {
-        // 先请求一次权限，否则拿不到设备 label
         await navigator.mediaDevices.getUserMedia({ audio: true });
         const allDevices = await navigator.mediaDevices.enumerateDevices();
         const audioDevices = allDevices.filter(d => d.kind === 'audioinput');
@@ -62,47 +60,154 @@ const RoomPage: React.FC = () => {
     getDevices();
   }, []);
 
+  // 定期更新 ICE 状态
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (webrtcRef.current) {
+        setIceState(webrtcRef.current.getIceState());
+      }
+    }, 2000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // 统一的 AudioContext 获取入口
+  const getAudioContext = () => {
+    if (!audioContextRef.current) {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)({
+        latencyHint: 'balanced', 
+        sampleRate: 48000,
+      });
+      
+      const compressor = ctx.createDynamicsCompressor();
+      compressor.threshold.setValueAtTime(-24, ctx.currentTime);
+      compressor.knee.setValueAtTime(30, ctx.currentTime);
+      compressor.ratio.setValueAtTime(12, ctx.currentTime);
+      compressor.attack.setValueAtTime(0.003, ctx.currentTime);
+      compressor.release.setValueAtTime(0.25, ctx.currentTime);
+      
+      const masterGain = ctx.createGain();
+      masterGain.gain.setValueAtTime(outputVolume / 100, ctx.currentTime); 
+      
+      // 直接连接：压缩器 -> 主增益 -> 扬声器
+      compressor.connect(masterGain);
+      masterGain.connect(ctx.destination);
+      
+      masterCompressorRef.current = compressor;
+      masterGainRef.current = masterGain;
+      audioContextRef.current = ctx;
+    }
+    return audioContextRef.current;
+  };
+
+  // 全局点击激活音频上下文
+  useEffect(() => {
+    const handleGesture = () => {
+      const ctx = audioContextRef.current;
+      if (ctx?.state === 'suspended') {
+        ctx.resume();
+      }
+    };
+    window.addEventListener('click', handleGesture);
+    return () => window.removeEventListener('click', handleGesture);
+  }, []);
+
+  // 实时调整音量
+  useEffect(() => {
+    if (masterGainRef.current && audioContextRef.current) {
+      masterGainRef.current.gain.setTargetAtTime(outputVolume / 100, audioContextRef.current.currentTime, 0.1);
+    }
+  }, [outputVolume]);
+
   useEffect(() => {
     if (localStream && micOn) {
-      const initAudioContext = async () => {
-        if (!audioContextRef.current) {
-          audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-        }
-        const ctx = audioContextRef.current;
+      const initLocalAnalysing = async () => {
+        const ctx = getAudioContext();
         if (ctx.state === 'suspended') {
           await ctx.resume();
         }
         
+        // 检查 localStream 是否有效
+        if (!localStream.active || localStream.getAudioTracks().length === 0) {
+          console.error("Local stream is not active or has no audio tracks");
+          return;
+        }
+
         const source = ctx.createMediaStreamSource(localStream);
+        
+        // 关键：创建一个专门用于“人声分析”的滤波器链路
+        // 这不会影响发送出去的声音质量（避免延迟），仅用于本地判定
+        const analysisFilter = ctx.createBiquadFilter();
+        analysisFilter.type = 'bandpass';
+        analysisFilter.frequency.value = 1500; // 中心频率设为人声最敏感的 1.5kHz
+        analysisFilter.Q.value = 1.0;          // 过滤掉极低频(摩擦声)和极高频(嘶嘶声)
+
         const analyser = ctx.createAnalyser();
-        analyser.fftSize = 256;
-        source.connect(analyser);
+        analyser.fftSize = 512;
+        analyser.smoothingTimeConstant = 0.4; // 增加平滑度，防止波动过快
+
+        source.connect(analysisFilter);
+        analysisFilter.connect(analyser);
         analyserRef.current = analyser;
 
         const bufferLength = analyser.frequencyBinCount;
         const dataArray = new Uint8Array(bufferLength);
+        
+        // 更严格的门限参数
+        const THRESHOLD = 18;  // 稍微提高门槛，过滤环境杂音
+        const HOLD_TIME = 800; // 增加保持时间，让对话更自然
+        let lastSpeakTime = 0;
 
         const checkVolume = () => {
           if (!micOn || !analyserRef.current) return;
           analyser.getByteFrequencyData(dataArray);
-          let sum = 0;
-          for (let i = 0; i < bufferLength; i++) {
-            sum += dataArray[i];
+          
+          // 1. 人声核心区 (300Hz - 3000Hz) - 人声能量最集中的地方
+          let vocalSum = 0;
+          let vocalMax = 0;
+          for (let i = 3; i < 32; i++) {
+            vocalSum += dataArray[i];
+            if (dataArray[i] > vocalMax) vocalMax = dataArray[i];
           }
-          const average = sum / bufferLength;
-          // 调低阈值到 5，并增加日志
-          if (average > 5) {
+          const vocalAvg = vocalSum / 29;
+
+          // 2. 噪声敏感区 (6000Hz+) - 主要是摩擦声、电流声、嘶嘶声
+          let noiseSum = 0;
+          for (let i = 64; i < 128; i++) {
+            noiseSum += dataArray[i];
+          }
+          const noiseAvg = noiseSum / 64;
+          
+          const now = Date.now();
+          
+          // AI 启发式逻辑：
+          // - 核心区能量必须高于门限
+          // - 核心区必须有显著的“峰值”（人声特征），而不仅仅是平铺的噪声
+          // - 核心区能量必须显著高于高频噪声区 (SNR 判定)
+          const hasVocalFeature = vocalMax > (vocalAvg * 1.2);
+          const isHumanVoice = vocalAvg > THRESHOLD && hasVocalFeature && vocalAvg > (noiseAvg * 2.0);
+
+          if (isHumanVoice) {
+            lastSpeakTime = now;
             setLocalSpeaking(true);
-          } else {
+            if (localOutputGainRef.current && audioContextRef.current) {
+              // 极速开启：10ms
+              localOutputGainRef.current.gain.setTargetAtTime(1.0, audioContextRef.current.currentTime, 0.01);
+            }
+          } else if (now - lastSpeakTime > HOLD_TIME) {
             setLocalSpeaking(false);
+            if (localOutputGainRef.current && audioContextRef.current) {
+              // 平滑关闭：150ms，防止产生“咔嗒”声
+              localOutputGainRef.current.gain.setTargetAtTime(0.001, audioContextRef.current.currentTime, 0.15);
+            }
           }
+
           requestAnimationFrame(checkVolume);
         };
 
         checkVolume();
       };
 
-      initAudioContext();
+      initLocalAnalysing();
 
       return () => {
         if (analyserRef.current) {
@@ -114,17 +219,6 @@ const RoomPage: React.FC = () => {
       setLocalSpeaking(false);
     }
   }, [localStream, micOn]);
-
-  // 全局点击激活音频上下文
-  useEffect(() => {
-    const handleGesture = () => {
-      if (audioContextRef.current?.state === 'suspended') {
-        audioContextRef.current.resume();
-      }
-    };
-    window.addEventListener('click', handleGesture);
-    return () => window.removeEventListener('click', handleGesture);
-  }, []);
 
   useEffect(() => {
     if (id) {
@@ -186,12 +280,14 @@ const RoomPage: React.FC = () => {
   };
 
   const handleToggleStatus = async () => {
+    if (!currentRoom) return;
     const newStatus = currentRoom.status === 'preparing' ? 'assaulting' : 'preparing';
     await toggleStatus(newStatus);
     message.success(`房间状态已切换为: ${newStatus === 'preparing' ? '备战' : '攻坚'}`);
   };
 
   const handleJoinTeam = async (teamId: string) => {
+    if (!currentRoom) return;
     try {
       await api.post(`/teams/${teamId}/join`);
       fetchRoom(currentRoom.id); // 刷新房间状态
@@ -200,6 +296,9 @@ const RoomPage: React.FC = () => {
       message.error('加入小队失败');
     }
   };
+
+  const localProcessedStreamRef = useRef<MediaStream | null>(null);
+  const localOutputGainRef = useRef<GainNode | null>(null);
 
   const handleMicToggle = async () => {
     const newMicState = !micOn;
@@ -211,24 +310,71 @@ const RoomPage: React.FC = () => {
             echoCancellation: true,
             noiseSuppression: true,
             autoGainControl: true,
+            // 启用一些高级实验性参数
+            // @ts-ignore
+            googEchoCancellation: true,
+            googAutoGainControl: true,
+            googNoiseSuppression: true,
+            googHighpassFilter: true, // 硬件级高通滤波
           } 
         });
         
+        const ctx = getAudioContext();
+        if (ctx.state === 'suspended') await ctx.resume();
+
+        // 建立发送端处理链路：源 -> 高通滤波 -> 软增益门 -> 目标
+        const source = ctx.createMediaStreamSource(stream);
+        
+        // 1. 低切滤波器 (切掉衣领摩擦、喷麦声)
+        const lowCut = ctx.createBiquadFilter();
+        lowCut.type = 'highpass';
+        lowCut.frequency.setValueAtTime(120, ctx.currentTime); // 提高到 120Hz，更彻底
+        
+        // 2. 软增益门
+        const gateGain = ctx.createGain();
+        gateGain.gain.setValueAtTime(0, ctx.currentTime); // 默认静音，等待检测开启
+        localOutputGainRef.current = gateGain;
+
+        // 3. 动态压缩器 (让声音更稳、更厚实)
+        const compressor = ctx.createDynamicsCompressor();
+        compressor.threshold.setValueAtTime(-20, ctx.currentTime);
+        compressor.knee.setValueAtTime(10, ctx.currentTime);
+        compressor.ratio.setValueAtTime(4, ctx.currentTime);
+
+        const dest = ctx.createMediaStreamDestination();
+        
+        source.connect(lowCut);
+        lowCut.connect(compressor);
+        compressor.connect(gateGain);
+        gateGain.connect(dest);
+
         setLocalStream(stream);
+        localProcessedStreamRef.current = dest.stream;
+
+        // 发送处理后的轨道
         if (webrtcRef.current) {
-          await webrtcRef.current.startProducing(stream.getAudioTracks()[0]);
+          const processedTrack = dest.stream.getAudioTracks()[0];
+          await webrtcRef.current.startProducing(processedTrack);
         }
+
         setMicOn(true);
-        await api.patch(`/users/${user.id}`, { micEnabled: true });
-        message.success('麦克风已开启');
-      } catch (err) {
+        if (user) {
+          await api.patch(`/users/${user.id}`, { micEnabled: true });
+        }
+        message.success('作战麦克风已开启 (专业级链路激活)');
+      } catch {
         message.error('无法获取麦克风权限');
       }
     } else {
       localStream?.getTracks().forEach(track => track.stop());
+      localProcessedStreamRef.current?.getTracks().forEach(track => track.stop());
       setLocalStream(null);
+      localProcessedStreamRef.current = null;
+      localOutputGainRef.current = null;
       setMicOn(false);
-      await api.patch(`/users/${user.id}`, { micEnabled: false });
+      if (user) {
+        await api.patch(`/users/${user.id}`, { micEnabled: false });
+      }
       message.info('麦克风已关闭');
     }
   };
@@ -236,7 +382,9 @@ const RoomPage: React.FC = () => {
   const handleSpeakerToggle = async () => {
     const newSpeakerState = !speakerOn;
     setSpeakerOn(newSpeakerState);
-    await api.patch(`/users/${user.id}`, { speakerEnabled: newSpeakerState });
+    if (user) {
+      await api.patch(`/users/${user.id}`, { speakerEnabled: newSpeakerState });
+    }
     if (!newSpeakerState) {
       audioElementsRef.current.forEach(audio => audio.pause());
       message.info('已停止收听');
@@ -276,44 +424,81 @@ const RoomPage: React.FC = () => {
     currentRoom.users.forEach(async (u) => {
       const isMe = u.id === user.id;
       const isMicOn = u.micEnabled;
-      const alreadySubscribed = audioElementsRef.current.has(u.id);
+      const alreadySubscribed = audioNodesRef.current.has(u.id);
 
       if (!isMe && isMicOn && !alreadySubscribed) {
         try {
           const consumer = await webrtcRef.current!.consume(u.id);
           if (consumer) {
+            const ctx = getAudioContext();
+            if (ctx.state === 'suspended') await ctx.resume();
+
             const stream = new MediaStream([consumer.track]);
-            const audio = new Audio();
-            audio.srcObject = stream;
-            audio.autoplay = true;
             
-            if (audioContainerRef.current) {
-              audioContainerRef.current.appendChild(audio);
-            }
+            // 关键修复：增加一个静音播放的 Audio 元素来激活 Chromium 的 WebRTC 数据流
+            const helperAudio = new Audio();
+            helperAudio.srcObject = stream;
+            helperAudio.muted = true;
+            helperAudio.play().catch(() => {});
+            audioElementsRef.current.set(u.id, helperAudio);
+
+            const source = ctx.createMediaStreamSource(stream);
             
-            audio.play().catch(() => {});
-            audioElementsRef.current.set(u.id, audio);
+            // A. 空间化定位：根据用户 ID 分配左右位置
+            const panner = ctx.createStereoPanner();
+            const panValue = (parseInt(u.id.slice(0, 2), 16) / 255) * 1.2 - 0.6; 
+            panner.pan.setValueAtTime(panValue, ctx.currentTime);
+
+            // B. 人声“清晰度”增强滤镜 (Presence Filter)
+            const clarity = ctx.createBiquadFilter();
+            clarity.type = 'peaking';
+            clarity.frequency.setValueAtTime(3000, ctx.currentTime);
+            clarity.Q.setValueAtTime(1.2, ctx.currentTime);
+            clarity.gain.setValueAtTime(3, ctx.currentTime); 
+
+            // C. 接收端防杂音过滤 (防止对方传来的低频杂音)
+            const lowCut = ctx.createBiquadFilter();
+            lowCut.type = 'highpass';
+            lowCut.frequency.setValueAtTime(150, ctx.currentTime);
+
+            // 链路：源 -> 清晰度增强 -> 空间定位 -> 低切 -> 总压缩器
+            source.connect(clarity);
+            clarity.connect(panner);
+            panner.connect(lowCut);
+            lowCut.connect(masterCompressorRef.current!);
+            
+            audioNodesRef.current.set(u.id, { source, panner, clarity, lowCut });
+            console.log(`[Audio] Premium spatial pipeline activated for ${u.username}`);
           }
-        } catch (err: any) {}
+        } catch (err: any) {
+          console.error('[Audio] Connection failed:', err);
+        }
       } 
       else if (!isMe && !isMicOn && alreadySubscribed) {
-        const audio = audioElementsRef.current.get(u.id);
-        audio?.pause();
-        if (audio && audio.parentNode) {
-          audio.parentNode.removeChild(audio);
-        }
+        const nodes = audioNodesRef.current.get(u.id);
+        nodes?.source.disconnect();
+        nodes?.clarity?.disconnect();
+        nodes?.panner.disconnect();
+        nodes?.lowCut?.disconnect();
+        audioNodesRef.current.delete(u.id);
+
+        const helper = audioElementsRef.current.get(u.id);
+        helper?.pause();
         audioElementsRef.current.delete(u.id);
       }
     });
 
-    // 清理已经离开房间的用户
-    const currentMemberIds = new Set(currentRoom.users.map(u => u.id));
-    audioElementsRef.current.forEach((audio, userId) => {
-      if (!currentMemberIds.has(userId)) {
-        audio.pause();
-        if (audio.parentNode) {
-          audio.parentNode.removeChild(audio);
-        }
+    // 清理离开的用户
+    audioNodesRef.current.forEach((nodes, userId) => {
+      if (!currentRoom.users.find(ux => ux.id === userId)) {
+        nodes.source.disconnect();
+        nodes.clarity?.disconnect();
+        nodes.panner.disconnect();
+        nodes.lowCut?.disconnect();
+        audioNodesRef.current.delete(userId);
+
+        const helper = audioElementsRef.current.get(userId);
+        helper?.pause();
         audioElementsRef.current.delete(userId);
       }
     });
@@ -321,16 +506,17 @@ const RoomPage: React.FC = () => {
   }, [currentRoom, user, speakerOn]);
 
   // 计算当前“谁能听到我”列表
-  const talkableUsers = currentRoom.users.filter(u => {
+  const talkableUsers = currentRoom ? currentRoom.users.filter(u => {
     // 1. 自己始终不显示在“可对话”列表中（避免冗余）
-    if (u.id === user.id) return false;
+    if (u.id === user?.id) return false;
 
     // 2. 如果是备战状态，所有人互通
     if (currentRoom.status === 'preparing') return true;
 
     // 3. 攻坚状态下的过滤逻辑（匹配后端路由算法）
-    const myRole = currentRoom.users.find(x => x.id === user.id)?.roomRole || 'member';
-    const myTeamId = currentRoom.users.find(x => x.id === user.id)?.teamId;
+    const myUser = currentRoom.users.find(x => x.id === user?.id);
+    const myRole = myUser?.roomRole || 'member';
+    const myTeamId = myUser?.teamId;
     const targetRole = u.roomRole;
     const targetTeamId = u.teamId;
 
@@ -347,7 +533,7 @@ const RoomPage: React.FC = () => {
     // D. 团长如果兼任了某队队长，也能听到该队队员（后端已涵盖，这里前端简化实现）
     
     return false;
-  });
+  }) : [];
 
   const unassignedUsers = currentRoom?.users?.filter(u => !u.teamId) || [];
 
@@ -499,37 +685,37 @@ const RoomPage: React.FC = () => {
 
         <div style={{ marginTop: '20px', padding: '40px', background: '#f9f9f9', borderRadius: '12px', textAlign: 'center', border: '2px solid #e6f7ff' }}>
           <div style={{ marginBottom: '20px' }}>
-            <Badge status="processing" text={<Text type="secondary">当前登录身份：<Text strong color="blue">{user.username}</Text></Text>} />
+            <Badge status="processing" text={<Text type="secondary">当前登录身份：<Text strong color="blue">{user?.username}</Text></Text>} />
           </div>
           <Title level={4} style={{ marginBottom: '30px' }}>
-            {currentRoom.status === 'preparing' ? '作战广播：当前全员互通' : '指挥雷达：当前可对话成员'}
+            {currentRoom?.status === 'preparing' ? '作战广播：当前全员互通' : '指挥雷达：当前可对话成员'}
           </Title>
           <div style={{ display: 'flex', justifyContent: 'center', gap: '32px', flexWrap: 'wrap' }}>
             {talkableUsers.length === 0 ? (
               <div style={{ padding: '20px', color: '#999' }}>
-                {currentRoom.status === 'assaulting' && !user.teamId ? '⚠️ 尚未入队，处于静默状态' : '当前暂无有效对话对象'}
+                {currentRoom?.status === 'assaulting' && !currentRoom.users.find(u => u.id === user?.id)?.teamId ? '⚠️ 尚未入队，处于静默状态' : '当前暂无有效对话对象'}
               </div>
             ) : (
               talkableUsers.map(u => (
                 <div key={u.id} style={{ textAlign: 'center' }}>
-                  <Badge dot={u.id === user.id ? localSpeaking : speakingUsers.has(u.id)} color="green" offset={[-10, 50]}>
+                  <Badge dot={u.id === user?.id ? localSpeaking : speakingUsers.has(u.id)} color="green" offset={[-10, 50]}>
                     <Avatar 
                       size={64} 
                       src={u.avatar} 
                       icon={<User size={32} />} 
                       style={{ 
-                        border: (u.id === user.id ? localSpeaking : speakingUsers.has(u.id)) ? '4px solid #52c41a' : '2px solid #fff',
-                        boxShadow: (u.id === user.id ? localSpeaking : speakingUsers.has(u.id)) ? '0 0 20px #52c41a' : '0 2px 8px rgba(0,0,0,0.1)',
+                        border: (u.id === user?.id ? localSpeaking : speakingUsers.has(u.id)) ? '4px solid #52c41a' : '2px solid #fff',
+                        boxShadow: (u.id === user?.id ? localSpeaking : speakingUsers.has(u.id)) ? '0 0 20px #52c41a' : '0 2px 8px rgba(0,0,0,0.1)',
                         transition: 'all 0.3s ease',
-                        backgroundColor: u.teamId ? currentRoom.teams.find(t => t.id === u.teamId)?.teamColor : '#ccc'
+                        backgroundColor: u.teamId ? currentRoom?.teams.find(t => t.id === u.teamId)?.teamColor : '#ccc'
                       }} 
                     />
                   </Badge>
                   <div style={{ marginTop: '12px' }}>
                     <Space direction="vertical" size={0}>
-                      <Text strong={(u.id === user.id ? localSpeaking : speakingUsers.has(u.id))} style={{ fontSize: '14px' }}>{u.username}</Text>
+                      <Text strong={(u.id === user?.id ? localSpeaking : speakingUsers.has(u.id))} style={{ fontSize: '14px' }}>{u.username}</Text>
                       <div style={{ display: 'flex', justifyContent: 'center', gap: '4px' }}>
-                        {currentRoom.leaderId === u.id && <Tag color="gold" style={{ margin: 0, transform: 'scale(0.8)' }}>团长</Tag>}
+                        {currentRoom?.leaderId === u.id && <Tag color="gold" style={{ margin: 0, transform: 'scale(0.8)' }}>团长</Tag>}
                         {u.roomRole === 'captain' && <Tag color="blue" style={{ margin: 0, transform: 'scale(0.8)' }}>队长</Tag>}
                       </div>
                     </Space>
@@ -562,10 +748,22 @@ const RoomPage: React.FC = () => {
             />
           </div>
           
-          <div style={{ display: 'flex', gap: '16px' }}>
+          <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
             <Text type="secondary" style={{ fontSize: '12px' }}>
-              接收流: <Text strong>{audioElementsRef.current.size}</Text>
+              接收流: <Text strong>{audioNodesRef.current.size}</Text>
             </Text>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Text type="secondary" style={{ fontSize: '12px' }}>输出音量:</Text>
+              <input 
+                type="range" 
+                min="0" 
+                max="100" 
+                value={outputVolume} 
+                onChange={(e) => setOutputVolume(parseInt(e.target.value))}
+                style={{ width: '80px', height: '4px' }}
+              />
+              <Text strong style={{ fontSize: '12px', minWidth: '25px' }}>{outputVolume}%</Text>
+            </div>
             <Text type="secondary" style={{ fontSize: '12px' }}>
               网络模式: <Text strong>{iceState.send === 'connected' ? '混合模式 (UDP/TCP)' : '探测中'}</Text>
             </Text>

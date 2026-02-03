@@ -23,6 +23,15 @@ export const config = {
         mimeType: 'audio/opus',
         clockRate: 48000,
         channels: 2,
+        preferredPayloadType: 111, // 增加此必填字段
+        parameters: {
+          'sprop-stereo': 1,
+          'stereo': 1,
+          'useinbandfec': 1,
+          'usedtx': 1,
+          'minptime': 10,
+          'x-google-start-bitrate': 64000
+        },
       },
     ] as mediasoup.types.RtpCodecCapability[],
   } as mediasoup.types.RouterOptions,

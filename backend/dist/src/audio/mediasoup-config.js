@@ -22,6 +22,15 @@ exports.config = {
                 mimeType: 'audio/opus',
                 clockRate: 48000,
                 channels: 2,
+                preferredPayloadType: 111,
+                parameters: {
+                    'sprop-stereo': 1,
+                    'stereo': 1,
+                    'useinbandfec': 1,
+                    'usedtx': 1,
+                    'minptime': 10,
+                    'x-google-start-bitrate': 64000
+                },
             },
         ],
     },
