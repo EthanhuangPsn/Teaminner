@@ -9,6 +9,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.AudioModule = void 0;
 const common_1 = require("@nestjs/common");
 const audio_service_1 = require("./audio.service");
+const agora_service_1 = require("./agora.service");
+const audio_controller_1 = require("./audio.controller");
 const rooms_module_1 = require("../rooms/rooms.module");
 const gateway_module_1 = require("../gateway/gateway.module");
 let AudioModule = class AudioModule {
@@ -20,8 +22,9 @@ exports.AudioModule = AudioModule = __decorate([
             (0, common_1.forwardRef)(() => rooms_module_1.RoomsModule),
             (0, common_1.forwardRef)(() => gateway_module_1.GatewayModule),
         ],
-        providers: [audio_service_1.AudioService],
-        exports: [audio_service_1.AudioService],
+        controllers: [audio_controller_1.AudioController],
+        providers: [audio_service_1.AudioService, agora_service_1.AgoraService],
+        exports: [audio_service_1.AudioService, agora_service_1.AgoraService],
     })
 ], AudioModule);
 //# sourceMappingURL=audio.module.js.map

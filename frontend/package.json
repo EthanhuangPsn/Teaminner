@@ -11,10 +11,10 @@
   },
   "dependencies": {
     "@prisma/client": "^7.3.0",
+    "agora-rtc-sdk-ng": "^4.24.2",
     "antd": "^6.2.2",
     "axios": "^1.13.4",
     "lucide-react": "^0.563.0",
-    "mediasoup-client": "^3.18.5",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.13.0",

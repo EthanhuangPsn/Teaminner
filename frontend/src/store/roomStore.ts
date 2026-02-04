@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { io, Socket } from 'socket.io-client';
 import api from '../api/client';
+import { useAuthStore } from './authStore';
 
 interface Room {
   id: string;
@@ -55,7 +56,11 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     try {
       const response = await api.post(`/rooms/${roomId}/join`);
       set({ currentRoom: response.data });
-      get().socket?.emit('subscribe-room', roomId);
+      
+      const { user } = useAuthStore.getState();
+      if (user) {
+        get().socket?.emit('subscribe-room', { roomId, userId: user.id });
+      }
     } catch (error) {
       console.error('Join room failed:', error);
       throw error;

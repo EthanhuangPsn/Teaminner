@@ -1,5 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { AudioService } from './audio.service';
+import { AgoraService } from './agora.service';
+import { AudioController } from './audio.controller';
 import { RoomsModule } from '../rooms/rooms.module';
 import { GatewayModule } from '../gateway/gateway.module';
 
@@ -8,7 +10,8 @@ import { GatewayModule } from '../gateway/gateway.module';
     forwardRef(() => RoomsModule),
     forwardRef(() => GatewayModule),
   ],
-  providers: [AudioService],
-  exports: [AudioService],
+  controllers: [AudioController],
+  providers: [AudioService, AgoraService],
+  exports: [AudioService, AgoraService],
 })
 export class AudioModule {}

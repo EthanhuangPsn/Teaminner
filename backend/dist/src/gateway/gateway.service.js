@@ -20,6 +20,11 @@ let GatewayService = class GatewayService {
             this.server.to(roomId).emit('user-speaking', { userId, isSpeaking });
         }
     }
+    sendAudioRoutingUpdate(userId, allowedUserIds) {
+        if (this.server) {
+            this.server.to(userId).emit('audio-routing-update', { allowedUserIds });
+        }
+    }
 };
 exports.GatewayService = GatewayService;
 exports.GatewayService = GatewayService = __decorate([

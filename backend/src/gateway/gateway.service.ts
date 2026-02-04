@@ -16,4 +16,10 @@ export class GatewayService {
       this.server.to(roomId).emit('user-speaking', { userId, isSpeaking });
     }
   }
+
+  sendAudioRoutingUpdate(userId: string, allowedUserIds: string[]) {
+    if (this.server) {
+      this.server.to(userId).emit('audio-routing-update', { allowedUserIds });
+    }
+  }
 }

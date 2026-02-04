@@ -4,7 +4,7 @@ import { useRoomStore } from '../store/roomStore';
 import { useAuthStore } from '../store/authStore';
 import { Mic, MicOff, Headphones, HeadphoneOff, ArrowLeft, Shield, User, Users, Wifi, Activity, Radio } from 'lucide-react';
 import api from '../api/client';
-import { WebRTCManager } from '../utils/webrtc';
+import { AgoraManager } from '../utils/agora';
 import { useParams, useNavigate } from 'react-router-dom';
 
 const { Sider, Content } = Layout;
@@ -19,29 +19,17 @@ const RoomPage: React.FC = () => {
   
   const [micOn, setMicOn] = useState(false);
   const [speakerOn, setSpeakerOn] = useState(true);
-  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [speakingUsers, setSpeakingUsers] = useState<Set<string>>(new Set());
   const [localSpeaking, setLocalSpeaking] = useState(false);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
-  const [iceState, setIceState] = useState({ send: 'none', recv: 'none' });
   const [outputVolume, setOutputVolume] = useState(60);
   const [isForceCalling, setIsForceCalling] = useState(false);
+  const [allowedIds, setAllowedIds] = useState<string[]>([]);
   
-  const webrtcRef = useRef<WebRTCManager | null>(null);
+  const agoraRef = useRef<AgoraManager | null>(null);
   const initializingRef = useRef(false);
-  const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
-  const audioNodesRef = useRef<Map<string, { 
-    source: MediaStreamAudioSourceNode, 
-    panner: StereoPannerNode,
-    clarity?: BiquadFilterNode,
-    lowCut?: BiquadFilterNode
-  }>>(new Map());
   const audioContainerRef = useRef<HTMLDivElement | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const masterCompressorRef = useRef<DynamicsCompressorNode | null>(null);
-  const masterGainRef = useRef<GainNode | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
 
   // 获取设备列表
   useEffect(() => {
@@ -61,166 +49,23 @@ const RoomPage: React.FC = () => {
     getDevices();
   }, []);
 
-  // 定期更新 ICE 状态
+  // 定期更新状态
   useEffect(() => {
     const timer = setInterval(() => {
-      if (webrtcRef.current) {
-        setIceState(webrtcRef.current.getIceState());
+      if (agoraRef.current) {
+        // 声网会自动处理连接状态
       }
     }, 2000);
     return () => clearInterval(timer);
   }, []);
 
-  // 统一的 AudioContext 获取入口
-  const getAudioContext = () => {
-    if (!audioContextRef.current) {
-      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)({
-        latencyHint: 'balanced', 
-        sampleRate: 48000,
-      });
-      
-      const compressor = ctx.createDynamicsCompressor();
-      compressor.threshold.setValueAtTime(-24, ctx.currentTime);
-      compressor.knee.setValueAtTime(30, ctx.currentTime);
-      compressor.ratio.setValueAtTime(12, ctx.currentTime);
-      compressor.attack.setValueAtTime(0.003, ctx.currentTime);
-      compressor.release.setValueAtTime(0.25, ctx.currentTime);
-      
-      const masterGain = ctx.createGain();
-      masterGain.gain.setValueAtTime(outputVolume / 100, ctx.currentTime); 
-      
-      // 直接连接：压缩器 -> 主增益 -> 扬声器
-      compressor.connect(masterGain);
-      masterGain.connect(ctx.destination);
-      
-      masterCompressorRef.current = compressor;
-      masterGainRef.current = masterGain;
-      audioContextRef.current = ctx;
-    }
-    return audioContextRef.current;
-  };
-
-  // 全局点击激活音频上下文
-  useEffect(() => {
-    const handleGesture = () => {
-      const ctx = audioContextRef.current;
-      if (ctx?.state === 'suspended') {
-        ctx.resume();
-      }
-    };
-    window.addEventListener('click', handleGesture);
-    return () => window.removeEventListener('click', handleGesture);
-  }, []);
-
   // 实时调整音量 (考虑开关和音量滑块)
   useEffect(() => {
-    if (masterGainRef.current && audioContextRef.current) {
-      const targetGain = speakerOn ? (outputVolume / 100) : 0;
-      masterGainRef.current.gain.setTargetAtTime(targetGain, audioContextRef.current.currentTime, 0.1);
+    if (agoraRef.current) {
+      const targetVolume = speakerOn ? outputVolume : 0;
+      agoraRef.current.setVolume(targetVolume);
     }
   }, [outputVolume, speakerOn]);
-
-  useEffect(() => {
-    if (localStream && micOn) {
-      const initLocalAnalysing = async () => {
-        const ctx = getAudioContext();
-        if (ctx.state === 'suspended') {
-          await ctx.resume();
-        }
-        
-        // 检查 localStream 是否有效
-        if (!localStream.active || localStream.getAudioTracks().length === 0) {
-          console.error("Local stream is not active or has no audio tracks");
-          return;
-        }
-
-        const source = ctx.createMediaStreamSource(localStream);
-        
-        // 关键：创建一个专门用于“人声分析”的滤波器链路
-        // 这不会影响发送出去的声音质量（避免延迟），仅用于本地判定
-        const analysisFilter = ctx.createBiquadFilter();
-        analysisFilter.type = 'bandpass';
-        analysisFilter.frequency.value = 1500; // 中心频率设为人声最敏感的 1.5kHz
-        analysisFilter.Q.value = 1.0;          // 过滤掉极低频(摩擦声)和极高频(嘶嘶声)
-
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = 512;
-        analyser.smoothingTimeConstant = 0.4; // 增加平滑度，防止波动过快
-
-        source.connect(analysisFilter);
-        analysisFilter.connect(analyser);
-        analyserRef.current = analyser;
-
-        const bufferLength = analyser.frequencyBinCount;
-        const dataArray = new Uint8Array(bufferLength);
-        
-        // 更严格的门限参数
-        const THRESHOLD = 18;  // 稍微提高门槛，过滤环境杂音
-        const HOLD_TIME = 800; // 增加保持时间，让对话更自然
-        let lastSpeakTime = 0;
-
-        const checkVolume = () => {
-          if (!micOn || !analyserRef.current) return;
-          analyser.getByteFrequencyData(dataArray);
-          
-          // 1. 人声核心区 (300Hz - 3000Hz) - 人声能量最集中的地方
-          let vocalSum = 0;
-          let vocalMax = 0;
-          for (let i = 3; i < 32; i++) {
-            vocalSum += dataArray[i];
-            if (dataArray[i] > vocalMax) vocalMax = dataArray[i];
-          }
-          const vocalAvg = vocalSum / 29;
-
-          // 2. 噪声敏感区 (6000Hz+) - 主要是摩擦声、电流声、嘶嘶声
-          let noiseSum = 0;
-          for (let i = 64; i < 128; i++) {
-            noiseSum += dataArray[i];
-          }
-          const noiseAvg = noiseSum / 64;
-          
-          const now = Date.now();
-          
-          // AI 启发式逻辑：
-          // - 核心区能量必须高于门限
-          // - 核心区必须有显著的“峰值”（人声特征），而不仅仅是平铺的噪声
-          // - 核心区能量必须显著高于高频噪声区 (SNR 判定)
-          const hasVocalFeature = vocalMax > (vocalAvg * 1.2);
-          const isHumanVoice = vocalAvg > THRESHOLD && hasVocalFeature && vocalAvg > (noiseAvg * 2.0);
-
-          if (isHumanVoice) {
-            lastSpeakTime = now;
-            setLocalSpeaking(true);
-            if (localOutputGainRef.current && audioContextRef.current) {
-              // 极速开启：10ms
-              localOutputGainRef.current.gain.setTargetAtTime(1.0, audioContextRef.current.currentTime, 0.01);
-            }
-          } else if (now - lastSpeakTime > HOLD_TIME) {
-            setLocalSpeaking(false);
-            if (localOutputGainRef.current && audioContextRef.current) {
-              // 平滑关闭：150ms，防止产生“咔嗒”声
-              localOutputGainRef.current.gain.setTargetAtTime(0.001, audioContextRef.current.currentTime, 0.15);
-            }
-          }
-
-          requestAnimationFrame(checkVolume);
-        };
-
-        checkVolume();
-      };
-
-      initLocalAnalysing();
-
-      return () => {
-        if (analyserRef.current) {
-          analyserRef.current.disconnect();
-          analyserRef.current = null;
-        }
-      };
-    } else {
-      setLocalSpeaking(false);
-    }
-  }, [localStream, micOn]);
 
   useEffect(() => {
     if (id) {
@@ -239,42 +84,85 @@ const RoomPage: React.FC = () => {
     }
   }, [currentRoom, user, navigate]);
 
-  // WebRTC 初始化
+  // Agora 初始化
   useEffect(() => {
-    if (socket && id && user && !webrtcRef.current && !initializingRef.current) {
-      initializingRef.current = true;
-      const manager = new WebRTCManager(
-        socket, 
-        id, 
-        user.id,
-        (state) => setIceState(state)
-      );
-      manager.init().then(success => {
-        if (success) {
-          webrtcRef.current = manager;
-          console.log('WebRTC Manager initialized');
-        }
-        initializingRef.current = false;
-      }).catch(() => {
-        initializingRef.current = false;
-      });
+    // 增加严格的单例保护：如果已经有实例或正在初始化，则不执行
+    if (!socket || !id || !user || agoraRef.current || initializingRef.current) return;
 
-      return () => {
-        manager.close();
-        webrtcRef.current = null;
-        initializingRef.current = false;
-        // 清理所有音频元素
-        audioElementsRef.current.forEach(audio => {
-          audio.pause();
-          audio.srcObject = null;
-          if (audio.parentNode) {
-            audio.parentNode.removeChild(audio);
-          }
+    initializingRef.current = true;
+    
+    const initAgora = async () => {
+      let managerInstance: AgoraManager | null = null;
+      try {
+        console.log('[Agora] Starting initialization...');
+        // 1. 获取 Token
+        const { data } = await api.get('/audio/token', {
+          params: { channelName: id }
         });
-        audioElementsRef.current.clear();
-      };
+        
+        console.log('[Agora] Token received:', data);
+        
+        // 2. 初始化 Agora 管理器
+        managerInstance = new AgoraManager(
+          data.appId,
+          id,
+          Number(data.uid),
+          data.token
+        );
+        
+        // 3. 执行 Join
+        await managerInstance.join();
+        
+        // 4. 只有在成功 join 之后才挂载到 ref
+        agoraRef.current = managerInstance;
+        console.log('Agora RTC initialized and joined');
+        
+        if (micOn) {
+          await managerInstance.publish();
+        }
+      } catch (err: any) {
+        // 如果是 UID_CONFLICT，说明由于 React 并发特性已经有一个在跑了，我们忽略它
+        if (err?.code === 'UID_CONFLICT' || err?.message?.includes('UID_CONFLICT')) {
+          console.warn('[Agora] Ignored concurrent initialization');
+          return;
+        }
+        console.error('Agora initialization failed:', err);
+        message.error('音频服务连接失败，请刷新重试');
+        initializingRef.current = false; // 只有真正的错误才允许重试
+      }
+    };
+
+    initAgora();
+
+    return () => {
+      // 这里的清理要非常小心，如果正在初始化，不要轻易重置锁
+      // 我们只在组件真正卸载时尝试离开
+    };
+  }, [socket, id, user]); // 只有核心依赖变化才重新初始化
+
+  // 监听语音路由更新
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleRoutingUpdate = ({ allowedUserIds }: { allowedUserIds: string[] }) => {
+      console.log('[RoomPage] Received audio routing update:', allowedUserIds);
+      setAllowedIds(allowedUserIds);
+    };
+
+    socket.on('audio-routing-update', handleRoutingUpdate);
+    return () => {
+      socket.off('audio-routing-update', handleRoutingUpdate);
+    };
+  }, [socket]);
+
+  // 当 Agora 实例或名单准备好时，同步名单
+  useEffect(() => {
+    // 关键修正：去掉 .length > 0 判定。即使名单为空（[]），也必须同步给 AgoraManager 去停止播放。
+    if (agoraRef.current) {
+      console.log('[RoomPage] Syncing allowed list to AgoraManager:', allowedIds);
+      agoraRef.current.updateAllowedUsers(allowedIds);
     }
-  }, [socket, id, user]);
+  }, [allowedIds, agoraRef.current]);
 
   // 移除第 58 行附近的早期 return null
 
@@ -337,80 +225,22 @@ const RoomPage: React.FC = () => {
     }
   };
 
-  const localProcessedStreamRef = useRef<MediaStream | null>(null);
-  const localOutputGainRef = useRef<GainNode | null>(null);
-
   const handleMicToggle = async () => {
     const newMicState = !micOn;
     if (newMicState) {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          audio: {
-            deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-            // 启用一些高级实验性参数
-            // @ts-ignore
-            googEchoCancellation: true,
-            googAutoGainControl: true,
-            googNoiseSuppression: true,
-            googHighpassFilter: true, // 硬件级高通滤波
-          } 
-        });
-        
-        const ctx = getAudioContext();
-        if (ctx.state === 'suspended') await ctx.resume();
-
-        // 建立发送端处理链路：源 -> 高通滤波 -> 软增益门 -> 目标
-        const source = ctx.createMediaStreamSource(stream);
-        
-        // 1. 低切滤波器 (切掉衣领摩擦、喷麦声)
-        const lowCut = ctx.createBiquadFilter();
-        lowCut.type = 'highpass';
-        lowCut.frequency.setValueAtTime(120, ctx.currentTime); // 提高到 120Hz，更彻底
-        
-        // 2. 软增益门
-        const gateGain = ctx.createGain();
-        gateGain.gain.setValueAtTime(0, ctx.currentTime); // 默认静音，等待检测开启
-        localOutputGainRef.current = gateGain;
-
-        // 3. 动态压缩器 (让声音更稳、更厚实)
-        const compressor = ctx.createDynamicsCompressor();
-        compressor.threshold.setValueAtTime(-20, ctx.currentTime);
-        compressor.knee.setValueAtTime(10, ctx.currentTime);
-        compressor.ratio.setValueAtTime(4, ctx.currentTime);
-
-        const dest = ctx.createMediaStreamDestination();
-        
-        source.connect(lowCut);
-        lowCut.connect(compressor);
-        compressor.connect(gateGain);
-        gateGain.connect(dest);
-
-        setLocalStream(stream);
-        localProcessedStreamRef.current = dest.stream;
-
-        // 发送处理后的轨道
-        if (webrtcRef.current) {
-          const processedTrack = dest.stream.getAudioTracks()[0];
-          await webrtcRef.current.startProducing(processedTrack);
-        }
-
+        await agoraRef.current?.publish();
         setMicOn(true);
         if (user) {
           await api.patch(`/users/${user.id}`, { micEnabled: true });
         }
-        message.success('作战麦克风已开启 (专业级链路激活)');
-      } catch {
-        message.error('无法获取麦克风权限');
+        message.success('作战麦克风已开启 (声网链路激活)');
+      } catch (err) {
+        console.error('Failed to publish audio:', err);
+        message.error('无法开启麦克风');
       }
     } else {
-      localStream?.getTracks().forEach(track => track.stop());
-      localProcessedStreamRef.current?.getTracks().forEach(track => track.stop());
-      setLocalStream(null);
-      localProcessedStreamRef.current = null;
-      localOutputGainRef.current = null;
+      await agoraRef.current?.unpublish();
       setMicOn(false);
       if (user) {
         await api.patch(`/users/${user.id}`, { micEnabled: false });
@@ -425,127 +255,63 @@ const RoomPage: React.FC = () => {
     if (user) {
       await api.patch(`/users/${user.id}`, { speakerEnabled: newSpeakerState });
     }
+    // 注意：updateRouting 在后端被触发后，会通过 socket 发回新的 allowedUserIds
+    // 我们的 AgoraManager 会在 updateAllowedUsers 中处理音轨的播放与停止
     if (!newSpeakerState) {
-      audioElementsRef.current.forEach(audio => audio.pause());
       message.info('已停止收听');
     } else {
       message.success('已开启收听');
     }
   };
 
-  // 监听说话状态
+  // 说话者检测
   useEffect(() => {
-    if (!socket || !currentRoom) return;
-
-    const handleUserSpeaking = ({ userId, isSpeaking }: { userId: string | null, isSpeaking: boolean }) => {
-      setSpeakingUsers(prev => {
-        const next = new Set(prev);
-        if (isSpeaking && userId) {
-          next.add(userId);
-        } else if (userId) {
-          next.delete(userId);
-        } else {
-          next.clear(); // silence
-        }
-        return next;
-      });
-    };
-
-    socket.on('user-speaking', handleUserSpeaking);
-    return () => {
-      socket.off('user-speaking', handleUserSpeaking);
-    };
-  }, [socket, currentRoom]);
-
-  // 监听其他用户的音频流
-  useEffect(() => {
-    if (!currentRoom || !user || !webrtcRef.current) return;
-
-    currentRoom.users.forEach(async (u) => {
-      const isMe = u.id === user.id;
-      const isMicOn = u.micEnabled;
-      const alreadySubscribed = audioNodesRef.current.has(u.id);
-
-      // 条件 A：应该订阅（非本人、对方开麦、且我开启了收听、且未订阅）
-      if (!isMe && isMicOn && speakerOn && !alreadySubscribed) {
-        try {
-          const consumer = await webrtcRef.current!.consume(u.id);
-          if (consumer) {
-            const ctx = getAudioContext();
-            if (ctx.state === 'suspended') await ctx.resume();
-
-            const stream = new MediaStream([consumer.track]);
-            
-            // 关键修复：增加一个静音播放的 Audio 元素来激活 Chromium 的 WebRTC 数据流
-            const helperAudio = new Audio();
-            helperAudio.srcObject = stream;
-            helperAudio.muted = true;
-            helperAudio.play().catch(() => {});
-            audioElementsRef.current.set(u.id, helperAudio);
-
-            const source = ctx.createMediaStreamSource(stream);
-            
-            // A. 空间化定位：根据用户 ID 分配左右位置
-            const panner = ctx.createStereoPanner();
-            const panValue = (parseInt(u.id.slice(0, 2), 16) / 255) * 1.2 - 0.6; 
-            panner.pan.setValueAtTime(panValue, ctx.currentTime);
-
-            // B. 人声“清晰度”增强滤镜 (Presence Filter)
-            const clarity = ctx.createBiquadFilter();
-            clarity.type = 'peaking';
-            clarity.frequency.setValueAtTime(3000, ctx.currentTime);
-            clarity.Q.setValueAtTime(1.2, ctx.currentTime);
-            clarity.gain.setValueAtTime(3, ctx.currentTime); 
-
-            // C. 接收端防杂音过滤 (防止对方传来的低频杂音)
-            const lowCut = ctx.createBiquadFilter();
-            lowCut.type = 'highpass';
-            lowCut.frequency.setValueAtTime(150, ctx.currentTime);
-
-            // 链路：源 -> 清晰度增强 -> 空间定位 -> 低切 -> 总压缩器
-            source.connect(clarity);
-            clarity.connect(panner);
-            panner.connect(lowCut);
-            lowCut.connect(masterCompressorRef.current!);
-            
-            audioNodesRef.current.set(u.id, { source, panner, clarity, lowCut });
-            console.log(`[Audio] Premium spatial pipeline activated for ${u.username}`);
+    if (agoraRef.current && user && currentRoom) {
+      const client = agoraRef.current.getInternalClient();
+      
+      const handleVolumeIndicator = (volumes: { uid: string | number, level: number }[]) => {
+        const speakingSet = new Set<string>();
+        let isLocalSpeaking = false;
+        
+        volumes.forEach(v => {
+          if (v.level > 5) {
+            const uidStr = v.uid.toString();
+            // 0 代表本地，或者匹配本地分配的数字 UID
+            if (v.uid === 0 || uidStr === agoraRef.current?.getUid().toString()) {
+              isLocalSpeaking = true;
+            } else {
+              speakingSet.add(uidStr);
+            }
           }
-        } catch (err: any) {
-          console.error('[Audio] Connection failed:', err);
-        }
-      } 
-      // 条件 B：应该断开（已订阅，但：对方关麦 OR 我关了收听）
-      else if (alreadySubscribed && (!isMicOn || !speakerOn)) {
-        const nodes = audioNodesRef.current.get(u.id);
-        nodes?.source.disconnect();
-        nodes?.clarity?.disconnect();
-        nodes?.panner.disconnect();
-        nodes?.lowCut?.disconnect();
-        audioNodesRef.current.delete(u.id);
+        });
+        
+        setSpeakingUsers(speakingSet);
+        setLocalSpeaking(isLocalSpeaking);
+      };
 
-        const helper = audioElementsRef.current.get(u.id);
-        helper?.pause();
-        audioElementsRef.current.delete(u.id);
-      }
-    });
+      client.enableAudioVolumeIndicator();
+      client.on('volume-indicator', handleVolumeIndicator);
+      
+      return () => {
+        client.off('volume-indicator', handleVolumeIndicator);
+      };
+    }
+  }, [agoraRef.current, user, currentRoom]);
 
-    // 清理离开的用户
-    audioNodesRef.current.forEach((nodes, userId) => {
-      if (!currentRoom.users.find(ux => ux.id === userId)) {
-        nodes.source.disconnect();
-        nodes.clarity?.disconnect();
-        nodes.panner.disconnect();
-        nodes.lowCut?.disconnect();
-        audioNodesRef.current.delete(userId);
-
-        const helper = audioElementsRef.current.get(userId);
-        helper?.pause();
-        audioElementsRef.current.delete(userId);
-      }
-    });
-
-  }, [currentRoom, user, speakerOn]);
+  // 辅助函数：判断用户是否正在说话 (支持 UUID 和 数字 UID 两种判定)
+  const isUserSpeaking = (userId: string) => {
+    // 1. 判定本地
+    if (userId === user?.id) return localSpeaking;
+    
+    // 2. 判定 UUID 匹配
+    if (speakingUsers.has(userId)) return true;
+    
+    // 3. 判定数字 UID 匹配 (将 UUID 转换为数字 ID 进行匹配)
+    const numericId = parseInt(userId.replace(/-/g, '').slice(-8), 16).toString();
+    if (speakingUsers.has(numericId)) return true;
+    
+    return false;
+  };
 
   // 计算当前“谁能听到我”列表
   const talkableUsers = currentRoom ? currentRoom.users.filter(u => {
@@ -734,7 +500,7 @@ const RoomPage: React.FC = () => {
                       >
                         <List.Item.Meta
                         avatar={
-                          <Badge dot={m.id === user.id ? localSpeaking : speakingUsers.has(m.id)} color="green" offset={[-2, 28]}>
+                          <Badge dot={isUserSpeaking(m.id)} color="green" offset={[-2, 28]}>
                             <Avatar size="small" src={m.avatar} icon={<User size={12} />} />
                           </Badge>
                         }
@@ -791,11 +557,11 @@ const RoomPage: React.FC = () => {
                         onDragStart={() => handleDragStart(u.id)}
                       >
                         <List.Item.Meta
-                          avatar={
-                            <Badge dot={u.id === user.id ? localSpeaking : speakingUsers.has(u.id)} color="green" offset={[-2, 28]}>
-                              <Avatar size="small" src={u.avatar} icon={<User size={12} />} />
-                            </Badge>
-                          }
+                        avatar={
+                          <Badge dot={isUserSpeaking(u.id)} color="green" offset={[-2, 28]}>
+                            <Avatar size="small" src={u.avatar} icon={<User size={12} />} />
+                          </Badge>
+                        }
                           title={
                             <Space size={4}>
                               <span style={{ fontSize: '14px' }}>{u.username}</span>
@@ -832,16 +598,16 @@ const RoomPage: React.FC = () => {
               </Space>
               
               <Space size={4}>
-                <Wifi size={12} color={iceState.send === 'connected' ? '#52c41a' : '#faad14'} />
+                <Wifi size={12} color="#52c41a" />
                 <Text type="secondary" style={{ fontSize: '10px' }}>
-                  上行: {iceState.send.toUpperCase()}
+                  网络: SD-RTN (全球传输网络)
                 </Text>
               </Space>
               
               <Space size={4}>
-                <Activity size={12} color={iceState.recv === 'connected' ? '#52c41a' : '#faad14'} />
+                <Activity size={12} color="#52c41a" />
                 <Text type="secondary" style={{ fontSize: '10px' }}>
-                  下行: {iceState.recv.toUpperCase()}
+                  接收流: {currentRoom.users.filter(u => u.id !== user?.id && u.micEnabled).length}个
                 </Text>
               </Space>
             </Space>
@@ -914,14 +680,14 @@ const RoomPage: React.FC = () => {
             ) : (
               talkableUsers.map(u => (
                 <div key={u.id} style={{ textAlign: 'center' }}>
-                  <Badge dot={u.id === user?.id ? localSpeaking : speakingUsers.has(u.id)} color="green" offset={[-10, 50]}>
+                  <Badge dot={isUserSpeaking(u.id)} color="green" offset={[-10, 50]}>
                     <Avatar 
                       size={64} 
                       src={u.avatar} 
                       icon={<User size={32} />} 
                       style={{ 
-                        border: (u.id === user?.id ? localSpeaking : speakingUsers.has(u.id)) ? '4px solid #52c41a' : '2px solid #fff',
-                        boxShadow: (u.id === user?.id ? localSpeaking : speakingUsers.has(u.id)) ? '0 0 20px #52c41a' : '0 2px 8px rgba(0,0,0,0.1)',
+                        border: isUserSpeaking(u.id) ? '4px solid #52c41a' : '2px solid #fff',
+                        boxShadow: isUserSpeaking(u.id) ? '0 0 20px #52c41a' : '0 2px 8px rgba(0,0,0,0.1)',
                         transition: 'all 0.3s ease',
                         backgroundColor: u.teamId ? currentRoom?.teams.find(t => t.id === u.teamId)?.teamColor : '#ccc'
                       }} 
@@ -929,7 +695,7 @@ const RoomPage: React.FC = () => {
                   </Badge>
                   <div style={{ marginTop: '12px' }}>
                     <Space direction="vertical" size={0}>
-                      <Text strong={(u.id === user?.id ? localSpeaking : speakingUsers.has(u.id))} style={{ fontSize: '14px' }}>{u.username}</Text>
+                      <Text strong={isUserSpeaking(u.id)} style={{ fontSize: '14px' }}>{u.username}</Text>
                       <div style={{ display: 'flex', justifyContent: 'center', gap: '4px' }}>
                         {currentRoom?.leaderId === u.id && <Tag color="gold" style={{ margin: 0, transform: 'scale(0.8)' }}>团长</Tag>}
                         {u.roomRole === 'captain' && <Tag color="blue" style={{ margin: 0, transform: 'scale(0.8)' }}>队长</Tag>}
@@ -959,14 +725,14 @@ const RoomPage: React.FC = () => {
               </select>
             </Space>
             <Badge 
-              status={iceState.send === 'connected' ? 'success' : 'processing'} 
-              text={iceState.send === 'connected' ? '语音通道已加密连通' : '正在建立连接...'} 
+              status={agoraRef.current ? 'success' : 'processing'} 
+              text={agoraRef.current ? '声网作战链路已加密连通' : '正在建立战术链路...'} 
             />
           </div>
           
           <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
             <Text type="secondary" style={{ fontSize: '12px' }}>
-              接收流: <Text strong>{audioNodesRef.current.size}</Text>
+              接收流: <Text strong>{currentRoom.users.filter(u => u.id !== user.id && u.micEnabled).length}</Text>
             </Text>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Text type="secondary" style={{ fontSize: '12px' }}>输出音量:</Text>
@@ -981,7 +747,7 @@ const RoomPage: React.FC = () => {
               <Text strong style={{ fontSize: '12px', minWidth: '25px' }}>{outputVolume}%</Text>
             </div>
             <Text type="secondary" style={{ fontSize: '12px' }}>
-              网络模式: <Text strong>{iceState.send === 'connected' ? '混合模式 (UDP/TCP)' : '探测中'}</Text>
+              网络模式: <Text strong>SD-RTN (全球传输网络)</Text>
             </Text>
           </div>
         </div>

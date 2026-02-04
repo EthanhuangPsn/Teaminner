@@ -40,35 +40,16 @@ let AppGateway = class AppGateway {
     handleDisconnect(client) {
         this.logger.log(`Client disconnected: ${client.id}`);
     }
-    handleSubscribeRoom(client, roomId) {
+    async handleSubscribeRoom(client, data) {
+        const { roomId, userId } = data;
+        client.join(userId);
         client.join(roomId);
-        this.logger.log(`Client ${client.id} subscribed to room ${roomId}`);
+        this.logger.log(`Client ${client.id} (User: ${userId}) subscribed to personal and room: ${roomId}`);
+        await this.audioService.updateRouting(roomId);
     }
     handleUnsubscribeRoom(client, roomId) {
         client.leave(roomId);
         this.logger.log(`Client ${client.id} unsubscribed from room ${roomId}`);
-    }
-    async handleGetRouterRtpCapabilities(client, roomId) {
-        const router = await this.audioService.getOrCreateRouter(roomId);
-        return router.rtpCapabilities;
-    }
-    async handleCreateWebRtcTransport(client, roomId) {
-        return this.audioService.createWebRtcTransport(roomId);
-    }
-    async handleConnectWebRtcTransport(client, data) {
-        await this.audioService.connectTransport(data.transportId, data.dtlsParameters);
-        return { success: true };
-    }
-    async handleProduce(client, data) {
-        const { id } = await this.audioService.createProducer(data.transportId, data.kind, data.rtpParameters, data.userId, data.roomId);
-        return { id };
-    }
-    async handleConsume(client, data) {
-        return this.audioService.createConsumer(data.roomId, data.transportId, data.producerUserId, data.rtpCapabilities, data.userId);
-    }
-    async handleResumeConsumer(client, data) {
-        await this.audioService.resumeConsumer(data.userId, data.producerId);
-        return { success: true };
     }
     async handleForceCall(client, data) {
         await this.audioService.setForceCall(data.roomId, data.enabled);
@@ -90,8 +71,8 @@ __decorate([
 __decorate([
     (0, websockets_1.SubscribeMessage)('subscribe-room'),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [socket_io_1.Socket, String]),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [socket_io_1.Socket, Object]),
+    __metadata("design:returntype", Promise)
 ], AppGateway.prototype, "handleSubscribeRoom", null);
 __decorate([
     (0, websockets_1.SubscribeMessage)('unsubscribe-room'),
@@ -99,42 +80,6 @@ __decorate([
     __metadata("design:paramtypes", [socket_io_1.Socket, String]),
     __metadata("design:returntype", void 0)
 ], AppGateway.prototype, "handleUnsubscribeRoom", null);
-__decorate([
-    (0, websockets_1.SubscribeMessage)('getRouterRtpCapabilities'),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", [socket_io_1.Socket, String]),
-    __metadata("design:returntype", Promise)
-], AppGateway.prototype, "handleGetRouterRtpCapabilities", null);
-__decorate([
-    (0, websockets_1.SubscribeMessage)('createWebRtcTransport'),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", [socket_io_1.Socket, String]),
-    __metadata("design:returntype", Promise)
-], AppGateway.prototype, "handleCreateWebRtcTransport", null);
-__decorate([
-    (0, websockets_1.SubscribeMessage)('connectWebRtcTransport'),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", [socket_io_1.Socket, Object]),
-    __metadata("design:returntype", Promise)
-], AppGateway.prototype, "handleConnectWebRtcTransport", null);
-__decorate([
-    (0, websockets_1.SubscribeMessage)('produce'),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", [socket_io_1.Socket, Object]),
-    __metadata("design:returntype", Promise)
-], AppGateway.prototype, "handleProduce", null);
-__decorate([
-    (0, websockets_1.SubscribeMessage)('consume'),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", [socket_io_1.Socket, Object]),
-    __metadata("design:returntype", Promise)
-], AppGateway.prototype, "handleConsume", null);
-__decorate([
-    (0, websockets_1.SubscribeMessage)('resumeConsumer'),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", [socket_io_1.Socket, Object]),
-    __metadata("design:returntype", Promise)
-], AppGateway.prototype, "handleResumeConsumer", null);
 __decorate([
     (0, websockets_1.SubscribeMessage)('leader:force-call'),
     __metadata("design:type", Function),
