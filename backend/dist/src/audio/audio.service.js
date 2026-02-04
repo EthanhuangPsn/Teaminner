@@ -253,7 +253,7 @@ let AudioService = AudioService_1 = class AudioService {
                 const consumer = userAConsumers.get(producerB.id);
                 if (!consumer)
                     continue;
-                const canCommunicate = this.checkCommunication(userA, userB, room);
+                const canCommunicate = userA.speakerEnabled && this.checkCommunication(userA, userB, room);
                 if (canCommunicate) {
                     if (consumer.paused) {
                         this.logger.log(`Resuming consumer for user ${userA.id} from producer of user ${userB.id} (routing update)`);

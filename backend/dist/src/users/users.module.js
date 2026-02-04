@@ -11,12 +11,16 @@ const common_1 = require("@nestjs/common");
 const users_service_1 = require("./users.service");
 const users_controller_1 = require("./users.controller");
 const gateway_module_1 = require("../gateway/gateway.module");
+const audio_module_1 = require("../audio/audio.module");
 let UsersModule = class UsersModule {
 };
 exports.UsersModule = UsersModule;
 exports.UsersModule = UsersModule = __decorate([
     (0, common_1.Module)({
-        imports: [gateway_module_1.GatewayModule],
+        imports: [
+            gateway_module_1.GatewayModule,
+            (0, common_1.forwardRef)(() => audio_module_1.AudioModule),
+        ],
         controllers: [users_controller_1.UsersController],
         providers: [users_service_1.UsersService],
         exports: [users_service_1.UsersService],

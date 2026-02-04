@@ -8,17 +8,23 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
+var __param = (this && this.__param) || function (paramIndex, decorator) {
+    return function (target, key) { decorator(target, key, paramIndex); }
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.UsersService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
 const gateway_service_1 = require("../gateway/gateway.service");
+const audio_service_1 = require("../audio/audio.service");
 let UsersService = class UsersService {
     prisma;
     gatewayService;
-    constructor(prisma, gatewayService) {
+    audioService;
+    constructor(prisma, gatewayService, audioService) {
         this.prisma = prisma;
         this.gatewayService = gatewayService;
+        this.audioService = audioService;
     }
     async findOne(id) {
         const user = await this.prisma.user.findUnique({
@@ -46,6 +52,9 @@ let UsersService = class UsersService {
             if (room) {
                 this.gatewayService.broadcastRoomUpdate(user.roomId, room);
             }
+            if (updateUserDto.micEnabled !== undefined || updateUserDto.speakerEnabled !== undefined) {
+                await this.audioService.updateRouting(user.roomId);
+            }
         }
         return user;
     }
@@ -53,7 +62,9 @@ let UsersService = class UsersService {
 exports.UsersService = UsersService;
 exports.UsersService = UsersService = __decorate([
     (0, common_1.Injectable)(),
+    __param(2, (0, common_1.Inject)((0, common_1.forwardRef)(() => audio_service_1.AudioService))),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
-        gateway_service_1.GatewayService])
+        gateway_service_1.GatewayService,
+        audio_service_1.AudioService])
 ], UsersService);
 //# sourceMappingURL=users.service.js.map

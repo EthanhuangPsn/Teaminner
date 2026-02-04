@@ -15,6 +15,7 @@ export declare class TeamsService {
         micEnabled: boolean;
         speakerEnabled: boolean;
         isSpeaking: boolean;
+        roomId: string | null;
         password: string | null;
         accountType: string;
         accountRole: string;
@@ -22,9 +23,8 @@ export declare class TeamsService {
         lastIp: string | null;
         deviceFingerprint: string | null;
         lastActiveAt: Date;
-        teamId: string | null;
         isOnline: boolean;
-        roomId: string | null;
+        teamId: string | null;
     }>;
     assignUserToTeam(teamId: string, targetUserId: string, commanderId: string): Promise<{
         id: string;
@@ -35,6 +35,7 @@ export declare class TeamsService {
         micEnabled: boolean;
         speakerEnabled: boolean;
         isSpeaking: boolean;
+        roomId: string | null;
         password: string | null;
         accountType: string;
         accountRole: string;
@@ -42,9 +43,8 @@ export declare class TeamsService {
         lastIp: string | null;
         deviceFingerprint: string | null;
         lastActiveAt: Date;
-        teamId: string | null;
         isOnline: boolean;
-        roomId: string | null;
+        teamId: string | null;
     }>;
     unassignUser(targetUserId: string, commanderId: string): Promise<{
         id: string;
@@ -55,6 +55,7 @@ export declare class TeamsService {
         micEnabled: boolean;
         speakerEnabled: boolean;
         isSpeaking: boolean;
+        roomId: string | null;
         password: string | null;
         accountType: string;
         accountRole: string;
@@ -62,9 +63,8 @@ export declare class TeamsService {
         lastIp: string | null;
         deviceFingerprint: string | null;
         lastActiveAt: Date;
-        teamId: string | null;
         isOnline: boolean;
-        roomId: string | null;
+        teamId: string | null;
     }>;
     leaveTeam(userId: string): Promise<void>;
     setCaptain(teamId: string, targetUserId: string, commanderId: string): Promise<{
@@ -76,6 +76,7 @@ export declare class TeamsService {
         micEnabled: boolean;
         speakerEnabled: boolean;
         isSpeaking: boolean;
+        roomId: string | null;
         password: string | null;
         accountType: string;
         accountRole: string;
@@ -83,9 +84,8 @@ export declare class TeamsService {
         lastIp: string | null;
         deviceFingerprint: string | null;
         lastActiveAt: Date;
-        teamId: string | null;
         isOnline: boolean;
-        roomId: string | null;
+        teamId: string | null;
     }>;
     enableTeam(teamId: string, enabled: boolean): Promise<{
         id: string;

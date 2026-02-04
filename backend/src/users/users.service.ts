@@ -1,13 +1,16 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { GatewayService } from '../gateway/gateway.service';
+import { AudioService } from '../audio/audio.service';
 
 @Injectable()
 export class UsersService {
   constructor(
     private prisma: PrismaService,
     private gatewayService: GatewayService,
+    @Inject(forwardRef(() => AudioService))
+    private audioService: AudioService,
   ) {}
 
   async findOne(id: string) {
@@ -25,7 +28,7 @@ export class UsersService {
     });
 
     if (user.roomId) {
-      // Broadcast room update so everyone sees the new mic/speaker status
+      // 1. 广播房间状态更新（UI 同步）
       const room = await this.prisma.room.findUnique({
         where: { id: user.roomId },
         include: {
@@ -37,6 +40,12 @@ export class UsersService {
       });
       if (room) {
         this.gatewayService.broadcastRoomUpdate(user.roomId, room);
+      }
+
+      // 2. 核心修正：触发音频路由更新（服务端暂停/恢复 Consumer）
+      // 只有当麦克风或收听状态改变时才需要更新路由
+      if (updateUserDto.micEnabled !== undefined || updateUserDto.speakerEnabled !== undefined) {
+        await this.audioService.updateRouting(user.roomId);
       }
     }
 

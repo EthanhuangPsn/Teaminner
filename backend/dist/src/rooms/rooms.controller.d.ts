@@ -37,6 +37,7 @@ export declare class RoomsController {
             micEnabled: boolean;
             speakerEnabled: boolean;
             isSpeaking: boolean;
+            roomId: string | null;
             password: string | null;
             accountType: string;
             accountRole: string;
@@ -44,9 +45,8 @@ export declare class RoomsController {
             lastIp: string | null;
             deviceFingerprint: string | null;
             lastActiveAt: Date;
-            teamId: string | null;
             isOnline: boolean;
-            roomId: string | null;
+            teamId: string | null;
         }[];
         teams: ({
             members: {
@@ -58,6 +58,7 @@ export declare class RoomsController {
                 micEnabled: boolean;
                 speakerEnabled: boolean;
                 isSpeaking: boolean;
+                roomId: string | null;
                 password: string | null;
                 accountType: string;
                 accountRole: string;
@@ -65,9 +66,8 @@ export declare class RoomsController {
                 lastIp: string | null;
                 deviceFingerprint: string | null;
                 lastActiveAt: Date;
-                teamId: string | null;
                 isOnline: boolean;
-                roomId: string | null;
+                teamId: string | null;
             }[];
         } & {
             id: string;
@@ -98,6 +98,7 @@ export declare class RoomsController {
             micEnabled: boolean;
             speakerEnabled: boolean;
             isSpeaking: boolean;
+            roomId: string | null;
             password: string | null;
             accountType: string;
             accountRole: string;
@@ -105,9 +106,8 @@ export declare class RoomsController {
             lastIp: string | null;
             deviceFingerprint: string | null;
             lastActiveAt: Date;
-            teamId: string | null;
             isOnline: boolean;
-            roomId: string | null;
+            teamId: string | null;
         }[];
         teams: ({
             members: {
@@ -119,6 +119,7 @@ export declare class RoomsController {
                 micEnabled: boolean;
                 speakerEnabled: boolean;
                 isSpeaking: boolean;
+                roomId: string | null;
                 password: string | null;
                 accountType: string;
                 accountRole: string;
@@ -126,9 +127,8 @@ export declare class RoomsController {
                 lastIp: string | null;
                 deviceFingerprint: string | null;
                 lastActiveAt: Date;
-                teamId: string | null;
                 isOnline: boolean;
-                roomId: string | null;
+                teamId: string | null;
             }[];
         } & {
             id: string;

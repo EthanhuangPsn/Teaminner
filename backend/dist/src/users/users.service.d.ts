@@ -1,10 +1,12 @@
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { GatewayService } from '../gateway/gateway.service';
+import { AudioService } from '../audio/audio.service';
 export declare class UsersService {
     private prisma;
     private gatewayService;
-    constructor(prisma: PrismaService, gatewayService: GatewayService);
+    private audioService;
+    constructor(prisma: PrismaService, gatewayService: GatewayService, audioService: AudioService);
     findOne(id: string): Promise<{
         id: string;
         createdAt: Date;
@@ -14,6 +16,7 @@ export declare class UsersService {
         micEnabled: boolean;
         speakerEnabled: boolean;
         isSpeaking: boolean;
+        roomId: string | null;
         password: string | null;
         accountType: string;
         accountRole: string;
@@ -21,9 +24,8 @@ export declare class UsersService {
         lastIp: string | null;
         deviceFingerprint: string | null;
         lastActiveAt: Date;
-        teamId: string | null;
         isOnline: boolean;
-        roomId: string | null;
+        teamId: string | null;
     }>;
     update(id: string, updateUserDto: UpdateUserDto): Promise<{
         id: string;
@@ -34,6 +36,7 @@ export declare class UsersService {
         micEnabled: boolean;
         speakerEnabled: boolean;
         isSpeaking: boolean;
+        roomId: string | null;
         password: string | null;
         accountType: string;
         accountRole: string;
@@ -41,8 +44,7 @@ export declare class UsersService {
         lastIp: string | null;
         deviceFingerprint: string | null;
         lastActiveAt: Date;
-        teamId: string | null;
         isOnline: boolean;
-        roomId: string | null;
+        teamId: string | null;
     }>;
 }

@@ -11,6 +11,7 @@ export declare class TeamsController {
         micEnabled: boolean;
         speakerEnabled: boolean;
         isSpeaking: boolean;
+        roomId: string | null;
         password: string | null;
         accountType: string;
         accountRole: string;
@@ -18,9 +19,8 @@ export declare class TeamsController {
         lastIp: string | null;
         deviceFingerprint: string | null;
         lastActiveAt: Date;
-        teamId: string | null;
         isOnline: boolean;
-        roomId: string | null;
+        teamId: string | null;
     }>;
     assignTeam(id: string, targetUserId: string, commander: any): Promise<{
         id: string;
@@ -31,6 +31,7 @@ export declare class TeamsController {
         micEnabled: boolean;
         speakerEnabled: boolean;
         isSpeaking: boolean;
+        roomId: string | null;
         password: string | null;
         accountType: string;
         accountRole: string;
@@ -38,9 +39,8 @@ export declare class TeamsController {
         lastIp: string | null;
         deviceFingerprint: string | null;
         lastActiveAt: Date;
-        teamId: string | null;
         isOnline: boolean;
-        roomId: string | null;
+        teamId: string | null;
     }>;
     unassign(targetUserId: string, commander: any): Promise<{
         id: string;
@@ -51,6 +51,7 @@ export declare class TeamsController {
         micEnabled: boolean;
         speakerEnabled: boolean;
         isSpeaking: boolean;
+        roomId: string | null;
         password: string | null;
         accountType: string;
         accountRole: string;
@@ -58,9 +59,8 @@ export declare class TeamsController {
         lastIp: string | null;
         deviceFingerprint: string | null;
         lastActiveAt: Date;
-        teamId: string | null;
         isOnline: boolean;
-        roomId: string | null;
+        teamId: string | null;
     }>;
     leaveTeam(user: any): Promise<void>;
     setCaptain(id: string, userId: string, commander: any): Promise<{
@@ -72,6 +72,7 @@ export declare class TeamsController {
         micEnabled: boolean;
         speakerEnabled: boolean;
         isSpeaking: boolean;
+        roomId: string | null;
         password: string | null;
         accountType: string;
         accountRole: string;
@@ -79,9 +80,8 @@ export declare class TeamsController {
         lastIp: string | null;
         deviceFingerprint: string | null;
         lastActiveAt: Date;
-        teamId: string | null;
         isOnline: boolean;
-        roomId: string | null;
+        teamId: string | null;
     }>;
     enableTeam(id: string, enabled: boolean): Promise<{
         id: string;

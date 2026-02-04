@@ -80,6 +80,7 @@ export declare class AuthService {
         micEnabled: boolean;
         speakerEnabled: boolean;
         isSpeaking: boolean;
+        roomId: string | null;
         password: string | null;
         accountType: string;
         accountRole: string;
@@ -87,8 +88,7 @@ export declare class AuthService {
         lastIp: string | null;
         deviceFingerprint: string | null;
         lastActiveAt: Date;
-        teamId: string | null;
         isOnline: boolean;
-        roomId: string | null;
+        teamId: string | null;
     } | null>;
 }

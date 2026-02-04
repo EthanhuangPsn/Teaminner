@@ -12,6 +12,7 @@ export declare class UsersController {
         micEnabled: boolean;
         speakerEnabled: boolean;
         isSpeaking: boolean;
+        roomId: string | null;
         password: string | null;
         accountType: string;
         accountRole: string;
@@ -19,9 +20,8 @@ export declare class UsersController {
         lastIp: string | null;
         deviceFingerprint: string | null;
         lastActiveAt: Date;
-        teamId: string | null;
         isOnline: boolean;
-        roomId: string | null;
+        teamId: string | null;
     }>;
     update(id: string, updateUserDto: UpdateUserDto): Promise<{
         id: string;
@@ -32,6 +32,7 @@ export declare class UsersController {
         micEnabled: boolean;
         speakerEnabled: boolean;
         isSpeaking: boolean;
+        roomId: string | null;
         password: string | null;
         accountType: string;
         accountRole: string;
@@ -39,8 +40,7 @@ export declare class UsersController {
         lastIp: string | null;
         deviceFingerprint: string | null;
         lastActiveAt: Date;
-        teamId: string | null;
         isOnline: boolean;
-        roomId: string | null;
+        teamId: string | null;
     }>;
 }

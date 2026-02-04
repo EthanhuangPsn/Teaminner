@@ -112,12 +112,13 @@ const RoomPage: React.FC = () => {
     return () => window.removeEventListener('click', handleGesture);
   }, []);
 
-  // 实时调整音量
+  // 实时调整音量 (考虑开关和音量滑块)
   useEffect(() => {
     if (masterGainRef.current && audioContextRef.current) {
-      masterGainRef.current.gain.setTargetAtTime(outputVolume / 100, audioContextRef.current.currentTime, 0.1);
+      const targetGain = speakerOn ? (outputVolume / 100) : 0;
+      masterGainRef.current.gain.setTargetAtTime(targetGain, audioContextRef.current.currentTime, 0.1);
     }
-  }, [outputVolume]);
+  }, [outputVolume, speakerOn]);
 
   useEffect(() => {
     if (localStream && micOn) {
@@ -458,14 +459,15 @@ const RoomPage: React.FC = () => {
 
   // 监听其他用户的音频流
   useEffect(() => {
-    if (!currentRoom || !user || !webrtcRef.current || !speakerOn) return;
+    if (!currentRoom || !user || !webrtcRef.current) return;
 
     currentRoom.users.forEach(async (u) => {
       const isMe = u.id === user.id;
       const isMicOn = u.micEnabled;
       const alreadySubscribed = audioNodesRef.current.has(u.id);
 
-      if (!isMe && isMicOn && !alreadySubscribed) {
+      // 条件 A：应该订阅（非本人、对方开麦、且我开启了收听、且未订阅）
+      if (!isMe && isMicOn && speakerOn && !alreadySubscribed) {
         try {
           const consumer = await webrtcRef.current!.consume(u.id);
           if (consumer) {
@@ -513,7 +515,8 @@ const RoomPage: React.FC = () => {
           console.error('[Audio] Connection failed:', err);
         }
       } 
-      else if (!isMe && !isMicOn && alreadySubscribed) {
+      // 条件 B：应该断开（已订阅，但：对方关麦 OR 我关了收听）
+      else if (alreadySubscribed && (!isMicOn || !speakerOn)) {
         const nodes = audioNodesRef.current.get(u.id);
         nodes?.source.disconnect();
         nodes?.clarity?.disconnect();

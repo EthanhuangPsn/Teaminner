@@ -244,7 +244,9 @@ export class AudioService implements OnModuleInit {
         const consumer = userAConsumers.get(producerB.id);
         if (!consumer) continue;
 
-        const canCommunicate = this.checkCommunication(userA, userB, room);
+        // 核心修正：如果收听者关闭了收听 (speakerEnabled === false)，则强制暂停所有消费者
+        const canCommunicate = userA.speakerEnabled && this.checkCommunication(userA, userB, room);
+        
         if (canCommunicate) {
           if (consumer.paused) {
             this.logger.log(`Resuming consumer for user ${userA.id} from producer of user ${userB.id} (routing update)`);
