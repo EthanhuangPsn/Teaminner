@@ -1,0 +1,9 @@
+{
+  "containerPort": 3000,
+  "dockerfilePath": "Dockerfile",
+  "buildDir": ".",
+  "envVars": {
+    "PORT": "3000",
+    "JWT_SECRET": "teaminner_secret_2026_safe"
+  }
+}

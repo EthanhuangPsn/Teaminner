@@ -1,0 +1,8 @@
+{
+  "containerPort": 80,
+  "dockerfilePath": "Dockerfile",
+  "buildDir": ".",
+  "envVars": {
+    "VITE_API_URL": "" 
+  }
+}
