@@ -1,4 +1,4 @@
-FROM node:18-alpine
+FROM node:20-alpine
 
 WORKDIR /app
 
@@ -26,4 +26,4 @@ EXPOSE 3000
 
 # 启动脚本：自动执行数据库迁移并启动服务
 # 注意：在 Railway 中我们会将数据库文件重定向到持久化卷
-CMD ["sh", "-c", "npx prisma migrate deploy && npm run start:prod"]
+CMD ["sh", "-c", "npx prisma db push && npm run start:prod"]
