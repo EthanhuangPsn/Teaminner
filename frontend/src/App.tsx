@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Layout, Button, Input, Modal, message, Typography, Space, Tag } from 'antd';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
+import api from './api/client';
 import { useAuthStore } from './store/authStore';
 import { useRoomStore } from './store/roomStore';
 import RoomList from './pages/RoomList';

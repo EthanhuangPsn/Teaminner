@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { io, Socket } from 'socket.io-client';
+import { io } from 'socket.io-client';
+import type { Socket } from 'socket.io-client';
 import api from '../api/client';
 import { useAuthStore } from './authStore';
 
@@ -88,7 +89,9 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   },
 
   connectSocket: (token) => {
-    const socket = io(import.meta.env.VITE_WS_URL || 'http://localhost:3000', {
+    // 优先使用 VITE_WS_URL，其次是 VITE_API_URL，最后兜底到当前域名
+    const wsUrl = import.meta.env.VITE_WS_URL || import.meta.env.VITE_API_URL || window.location.origin;
+    const socket = io(wsUrl, {
       auth: { token },
     });
 

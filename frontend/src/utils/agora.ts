@@ -1,4 +1,5 @@
-import AgoraRTC, { IAgoraRTCClient, IMicrophoneAudioTrack, IRemoteAudioTrack } from 'agora-rtc-sdk-ng';
+import AgoraRTC from 'agora-rtc-sdk-ng';
+import type { IAgoraRTCClient, IMicrophoneAudioTrack, IRemoteAudioTrack } from 'agora-rtc-sdk-ng';
 
 // 辅助函数：将 UUID 字符串转换为 32 位无符号整数 (声网要求的 UID)
 export function getNumericUid(str: string): number {
