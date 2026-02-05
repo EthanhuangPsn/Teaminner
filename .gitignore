@@ -13,3 +13,15 @@ frontend/dist
 ./backend/logs/*
 ./frontend/logs/*
 ./backend/logs/*
+# Database
+backend/prisma/dev.db
+backend/prisma/dev.db-journal
+
+# IDE
+.vscode
+.cursor
+.idea
+
+# OS
+.DS_Store
+Thumbs.db
