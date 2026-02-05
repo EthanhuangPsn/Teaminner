@@ -24,6 +24,5 @@ RUN npx prisma generate
 # 暴露端口
 EXPOSE 3000
 
-# 启动脚本：自动执行数据库迁移并启动服务
-# 注意：在 Railway 中我们会将数据库文件重定向到持久化卷
-CMD ["sh", "-c", "npx prisma db push && npm run start:prod"]
+# 启动脚本：确保 /data 目录存在并同步数据库
+CMD ["sh", "-c", "mkdir -p /data && npx prisma db push && npm run start:prod"]
