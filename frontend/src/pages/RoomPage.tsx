@@ -4,7 +4,7 @@ import { useRoomStore } from '../store/roomStore';
 import { useAuthStore } from '../store/authStore';
 import { Mic, MicOff, Headphones, HeadphoneOff, ArrowLeft, Shield, User, Users, Wifi, Activity, Radio } from 'lucide-react';
 import api from '../api/client';
-import { AgoraManager } from '../utils/agora';
+import { AgoraManager, getNumericUid } from '../utils/agora';
 import { useParams, useNavigate } from 'react-router-dom';
 
 const { Sider, Content } = Layout;
@@ -307,40 +307,19 @@ const RoomPage: React.FC = () => {
     if (speakingUsers.has(userId)) return true;
     
     // 3. 判定数字 UID 匹配 (将 UUID 转换为数字 ID 进行匹配)
-    const numericId = parseInt(userId.replace(/-/g, '').slice(-8), 16).toString();
+    const numericId = getNumericUid(userId).toString();
     if (speakingUsers.has(numericId)) return true;
     
     return false;
   };
 
-  // 计算当前“谁能听到我”列表
+  // 核心：直接使用后端下发的权威名单来决定 UI 展示
+  // 这样 UI 看到谁，耳朵里就一定能听到谁，绝不会产生分歧
   const talkableUsers = currentRoom ? currentRoom.users.filter(u => {
-    // 1. 自己始终不显示在“可对话”列表中（避免冗余）
     if (u.id === user?.id) return false;
-
-    // 2. 如果是备战状态，所有人互通
-    if (currentRoom.status === 'preparing') return true;
-
-    // 3. 攻坚状态下的过滤逻辑（匹配后端路由算法）
-    const myUser = currentRoom.users.find(x => x.id === user?.id);
-    const myRole = myUser?.roomRole || 'member';
-    const myTeamId = myUser?.teamId;
-    const targetRole = u.roomRole;
-    const targetTeamId = u.teamId;
-
-    // A. 团长与队长的关系
-    if (myRole === 'leader' && targetRole === 'captain') return true;
-    if (myRole === 'captain' && targetRole === 'leader') return true;
-
-    // B. 队长与队长的关系
-    if (myRole === 'captain' && targetRole === 'captain') return true;
-
-    // C. 队内关系
-    if (myTeamId && myTeamId === targetTeamId) return true;
-
-    // D. 团长如果兼任了某队队长，也能听到该队队员（后端已涵盖，这里前端简化实现）
-    
-    return false;
+    // 将 UUID 转换为声网 UID 字符串进行匹配
+    const numericUid = getNumericUid(u.id).toString();
+    return allowedIds.includes(numericUid);
   }) : [];
 
   const unassignedUsers = currentRoom?.users?.filter(u => !u.teamId) || [];
