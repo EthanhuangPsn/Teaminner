@@ -3,6 +3,6 @@
   "dockerfilePath": "Dockerfile",
   "buildDir": ".",
   "envVars": {
-    "VITE_API_URL": "" 
+    "VITE_API_URL": "jpuehpdm.backend.2y71h6xw.idm4h26r.com"
   }
 }
