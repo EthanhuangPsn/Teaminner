@@ -1,5 +1,8 @@
 import axios from 'axios';
 
+// 添加这行日志！
+console.log('--- 调试：当前 API 地址 ---', import.meta.env.VITE_API_URL);
+
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3000',
 });
