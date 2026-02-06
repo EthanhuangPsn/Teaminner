@@ -5,9 +5,11 @@ COPY package*.json ./
 RUN npm install
 COPY . .
 
-# 接收构建参数
+# --- 核心修改：接收参数并写入 .env 文件 ---
 ARG VITE_API_URL
-ENV VITE_API_URL=$VITE_API_URL
+# 这行确保 Vite 构建时能从文件读取到变量
+RUN echo "VITE_API_URL=$VITE_API_URL" > .env
+# ---------------------------------------
 
 # 执行构建
 RUN npm run build
